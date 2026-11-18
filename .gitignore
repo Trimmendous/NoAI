@@ -1,0 +1,28 @@
+/dist/
+/src-tauri/target/
+/node_modules/
+*.log
+.DS_Store
+
+# Credentials and machine-local agent configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+.aws/
+.codex/
+.claude/
+.agents/
+.ssh/
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+auth.json
+
+# Generated schemas, caches, and local handoff notes
+/src-tauri/gen/
+__pycache__/
+*.pyc
+/HANDOFF.md

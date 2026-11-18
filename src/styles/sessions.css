@@ -1,0 +1,60 @@
+.sessions-view { width: min(100%, 1240px); }
+.sessions-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sessions-search { flex: 1 1 260px; }
+.sessions-search input { width: 100%; }
+.sessions-toolbar select { min-height: 36px; }
+.sessions-list-meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 22px 0 12px; color: var(--ink-muted); font-size: 11px; }
+#sessions-count { color: var(--ink-soft); font-weight: 600; }
+.sessions-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.sessions-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.sessions-table th { padding: 13px 18px; border-bottom: 1px solid var(--line); color: var(--ink-muted); background: var(--surface-subtle); font-size: 10px; font-weight: 550; white-space: nowrap; }
+.sessions-table td { padding: 17px 18px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.sessions-table tr:last-child td { border-bottom: 0; }
+.sessions-table tbody tr { cursor: pointer; }
+.sessions-table tbody tr:hover, .sessions-table tbody tr:focus-within { background: var(--surface-hover); }
+.sessions-table td:first-child { min-width: 230px; max-width: 380px; }
+.session-title-link { color: var(--ink); text-decoration: none; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.session-title-link:hover { color: var(--accent); }
+.sessions-table small { display: block; margin-top: 5px; color: var(--ink-muted); font-size: 10px; overflow-wrap: anywhere; }
+.session-project { max-width: 180px; overflow-wrap: anywhere; }
+.session-date { color: var(--ink-soft); min-width: 150px; font-size: 11px; }
+.session-count { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.sessions-pagination { margin-top: 18px; }
+.session-detail-view { width: min(100%, 1000px); }
+.session-detail-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 35px; }
+.session-detail-view h2 { overflow-wrap: anywhere; font-size: clamp(23px, 3vw, 30px); line-height: 1.25; }
+#session-project { overflow-wrap: anywhere; }
+.session-detail-view .session-meta { margin-top: 12px; font-size: 11px; color: var(--ink-muted); }
+.session-file { margin: 20px 0 32px; font-size: 11px; color: var(--ink-muted); }
+.session-file summary { cursor: pointer; }
+.session-file p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-conversation-heading { font-size: 16px; font-weight: 550; margin: 32px 0 16px; }
+.session-message { padding: 24px 0; border-top: 1px solid var(--line); }
+.session-message header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 12px; font-size: 12px; }
+.session-message header strong { color: var(--ink-soft); font-weight: 550; }
+.session-message time { color: var(--ink-muted); font-size: 10px; }
+.session-message-text { color: var(--ink); font-size: 13px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-message.is-user { padding: 20px; margin: 10px 0; border: 0; border-radius: 14px; background: var(--surface-subtle); }
+.session-message details { color: var(--ink-muted); font-size: 12px; }
+.session-message summary { cursor: pointer; }
+.session-message pre { overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.6 ui-monospace, monospace; }
+#session-detail-status { font-size: 12px; color: var(--ink-muted); }
+#session-load-more { display: block; margin: 24px auto; }
+#session-load-more[hidden] { display: none; }
+@media (max-width:720px) {
+  .sessions-toolbar > label:not(.sessions-search) { flex: 1; }
+  .sessions-toolbar select { width: 100%; }
+  .session-detail-nav { margin-bottom: 24px; }
+  .session-message header { flex-wrap: wrap; gap: 5px; }
+}
+
+.session-stats-more { margin-top: 14px; font-size: 11px; color: var(--ink-muted); }
+.session-stats-more > summary { cursor: pointer; padding: 6px 0; }
+.session-stats-more > .session-stats-grid { margin-top: 12px; }
+.session-detail-view > .session-stats { border-top: 0; }
+.sessions-table { min-width: 850px; }
+.session-project { min-width: 110px; }
+@media (max-width:720px) {
+  .sessions-search { flex-basis: 100%; }
+  .sessions-toolbar > label:not(.sessions-search) { min-width: 120px; }
+}

@@ -1,0 +1,257 @@
+#!/usr/bin/env node
+import net from 'node:net';
+import { parseOffsetTime } from '../src/js/core/schedule-time.js';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { manageService, defaultBinary } from '../scripts/systemd.mjs';
+
+const HELP = `Noai CLI — schedule local coding-agent tasks
+
+Usage:
+  noai jobs list [--socket PATH]
+  noai jobs create --title TEXT (--prompt TEXT | --prompt-file PATH)
+      [--harness codex|claude] [--model MODEL] [--project DIR]
+      [--at now|ISO-8601] [--every 30m|2h|1d] [--auto-resume true|false]
+      [--permissions workspace-network|workspace-write|read-only|provider-default|auto-review]
+      [--dangerously-bypass-permissions true|false]
+      [--dry-run true|false] [--format json|text (dry run only)]
+  noai jobs cancel ID
+  noai jobs runs ID
+  noai jobs retry ID [--at ISO-8601]
+  noai jobs update-auto-resume ID true|false
+  noai service install [--binary /absolute/path/to/noai]
+  noai service start|stop|status|uninstall
+
+Jobs require Noai running in the desktop app or Linux user service. Job output is JSON for scripting.
+The app runs tasks locally through your installed Codex or Claude CLI.
+New Codex jobs default to sandboxed project writes and network access.
+New Claude jobs default to automatic permission review (requires provider support).
+Permission bypass is opt-in for each scheduled job. It gives the selected agent
+unattended access to tools and files, so use it only for tasks you trust.
+
+Try a job without launching an agent or connecting to Noai:
+  noai jobs create --title "First review" --prompt "Summarize this project" --project . --permissions read-only --dry-run true
+Dry runs print a JSON preview and validate CLI options only, not provider readiness
+or server-side acceptance. Add --format text for a readable preview. Remove --dry-run true and any --format option to create the real job.
+--at rejects invalid calendar dates; an explicit offset selects the intended repeated DST hour.
+--every 1d means 86400 seconds, not a fixed local time across daylight-saving changes.
+`;
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function parseBoolean(value, name) {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  fail(`${name} must be true or false`);
+}
+
+function parseInterval(value) {
+  const match = /^(\d+)([smhd])$/.exec(value ?? '');
+  if (!match) fail('--every must look like 30m, 2h, or 1d');
+  const seconds = Number(match[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[match[2]];
+  if (!Number.isSafeInteger(seconds) || seconds < 60) fail('--every must be at least 60 seconds');
+  return seconds;
+}
+
+function parseAt(value) {
+  if (!value || value === 'now') return Math.floor(Date.now() / 1000);
+  let seconds;
+  try { seconds = parseOffsetTime(value); }
+  catch (error) { fail(`--at: ${error.message}`); }
+  if (seconds <= Date.now() / 1000) fail('--at must be in the future, or use "now"');
+  return seconds;
+}
+
+export function parse(argv) {
+  const args = [...argv];
+  let socketPath;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--socket') {
+      if (!args[i + 1]) fail('--socket requires a path');
+      socketPath = args[i + 1];
+      args.splice(i, 2);
+      i--;
+    }
+  }
+  if (args.length === 0 || args[0] === 'help' || args[0] === '--help') return { help: true };
+  const group = args.shift();
+  if (group === 'service') {
+    if (socketPath) fail('--socket is for jobs only');
+    const command = args.shift();
+    if (!['install', 'start', 'stop', 'status', 'uninstall'].includes(command)) fail(`Unknown service command: ${command || '(missing)'}`);
+    if (command === 'install') {
+      if (args.length === 0) return { service: command };
+      if (args.length !== 2 || args[0] !== '--binary' || !path.isAbsolute(args[1])) fail('service install accepts --binary /absolute/path/to/noai');
+      return { service: command, binary: args[1] };
+    }
+    if (args.length) fail(`service ${command} takes no arguments`);
+    return { service: command };
+  }
+  if (group !== 'jobs') fail('Expected "jobs" or "service"; run noai help');
+  const command = args.shift();
+  if (command === 'list') {
+    if (args.length) fail('jobs list takes no arguments');
+    return { socketPath, request: { command: 'list' } };
+  }
+  if (command === 'cancel' || command === 'runs') {
+    if (args.length !== 1 || !args[0] || args[0].startsWith('--')) fail(`jobs ${command} requires one task ID`);
+    return { socketPath, request: { command, id: args[0] } };
+  }
+  if (command === 'retry') {
+    if (!args[0] || args[0].startsWith('--') || ![1,3].includes(args.length) || args.length === 3 && args[1] !== '--at') fail('jobs retry requires ID [--at ISO-8601]');
+    return { socketPath, retry: {id:args[0], startAt:args.length === 3 ? parseAt(args[2]) : Math.floor(Date.now()/1000)+60} };
+  }
+  if (command === 'update-auto-resume') {
+    if (args.length !== 2 || !args[0] || args[0].startsWith('--')) fail('jobs update-auto-resume requires ID true|false');
+    return { socketPath, request: { command: 'update_auto_resume', id: args[0], enabled: parseBoolean(args[1], 'auto-resume') } };
+  }
+  if (command !== 'create') fail(`Unknown jobs command: ${command || '(missing)'}`);
+  const options = {};
+  const allowed = new Set(['--title', '--prompt', '--prompt-file', '--harness', '--model', '--project', '--at', '--every', '--auto-resume', '--dangerously-bypass-permissions', '--permissions', '--dry-run', '--format']);
+  for (let i = 0; i < args.length; i += 2) {
+    const key = args[i];
+    const value = args[i + 1];
+    if (!allowed.has(key)) fail(`Unknown option: ${key}`);
+    if (!value || value.startsWith('--')) fail(`${key} requires a value`);
+    if (options[key] !== undefined) fail(`${key} was repeated`);
+    options[key] = value;
+  }
+  if (!options['--title']?.trim()) fail('--title is required');
+  if (Boolean(options['--prompt']) === Boolean(options['--prompt-file'])) fail('Use exactly one of --prompt or --prompt-file');
+  let prompt = options['--prompt'];
+  if (options['--prompt-file']) {
+    try { prompt = fs.readFileSync(options['--prompt-file'], 'utf8'); }
+    catch (error) { fail(`Cannot read prompt file: ${error.message}`); }
+  }
+  if (!prompt?.trim()) fail('Prompt cannot be empty');
+  const harness = options['--harness'] ?? 'codex';
+  if (!['codex', 'claude'].includes(harness)) fail('--harness must be codex or claude');
+  const permissions = options['--permissions'] ?? (harness === 'codex' ? 'workspace-network' : 'auto-review');
+  const supported = harness === 'codex' ? ['workspace-network', 'workspace-write', 'read-only', 'provider-default'] : ['auto-review', 'provider-default'];
+  if (!supported.includes(permissions)) fail(`--permissions for ${harness} must be one of: ${supported.join(', ')}`);
+  const input = {
+    permissions,
+    title: options['--title'],
+    prompt,
+    harness,
+    model: options['--model'] ?? null,
+    projectPath: options['--project'] ? path.resolve(options['--project']) : '',
+    startAt: parseAt(options['--at']),
+    intervalSeconds: options['--every'] ? parseInterval(options['--every']) : null,
+    autoResume: options['--auto-resume'] === undefined ? true : parseBoolean(options['--auto-resume'], '--auto-resume'),
+    dangerouslyBypassPermissions: options['--dangerously-bypass-permissions'] === undefined ? false : parseBoolean(options['--dangerously-bypass-permissions'], '--dangerously-bypass-permissions'),
+  };
+  const dryRun = options['--dry-run'] === undefined ? false : parseBoolean(options['--dry-run'], '--dry-run');
+  const format = options['--format'] ?? 'json';
+  if (!['json', 'text'].includes(format)) fail('--format must be json or text');
+  if (options['--format'] && !dryRun) fail('--format requires --dry-run true');
+  return { socketPath, dryRun, format, request: { command: 'create', input } };
+}
+
+export function formatPreview(input) {
+  // JSON string quoting keeps user-supplied terminal control characters inert.
+  const value = text => JSON.stringify(text);
+  return [
+    'Dry run — CLI options valid. No job created; no agent launched.',
+    `Title: ${value(input.title)}`, `Prompt: ${value(input.prompt)}`,
+    `Project: ${input.projectPath ? value(input.projectPath) : 'New folder on real creation'}`,
+    `Harness: ${input.harness} · Model: ${value(input.model ?? 'Provider default')}`,
+    `Permissions: ${input.permissions} · Bypass: ${input.dangerouslyBypassPermissions}`,
+    `Start: ${new Date(input.startAt * 1000).toISOString()}`,
+    `Repeat: ${input.intervalSeconds ? `Every ${input.intervalSeconds} seconds (fixed interval, not local-calendar days)` : 'One time'}`,
+    `Automatic timed resume: ${input.autoResume}`,
+    'Not checked: provider readiness, project access, or server acceptance.',
+  ].join('\n');
+}
+
+export function defaultSocketPath(env = process.env, home = os.homedir()) {
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'dev.noai.desktop', 'control.sock');
+  const data = env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+  return path.join(data, 'dev.noai.desktop', 'control.sock');
+}
+
+export function sendRequest(socketPath, request) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    let output = '';
+    let settled = false;
+    const done = (error, value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      error ? reject(error) : resolve(value);
+    };
+    socket.setTimeout(15000, () => done(new Error('Noai did not respond in 15 seconds')));
+    socket.on('connect', () => socket.end(JSON.stringify(request) + '\n'));
+    socket.on('data', chunk => {
+      output += chunk;
+      if (output.length > 16 * 1024 * 1024) return done(new Error('Noai response is too large'));
+      if (output.includes('\n')) {
+        try { done(null, JSON.parse(output.slice(0, output.indexOf('\n')))); }
+        catch { done(new Error('Noai returned invalid JSON')); }
+      }
+    });
+    socket.on('error', error => done(error.code === 'ENOENT' || error.code === 'ECONNREFUSED'
+      ? new Error(`Cannot connect to Noai at ${socketPath}. Start the desktop app or Linux user service.`)
+      : error));
+    socket.on('end', () => { if (!settled) done(new Error('Noai closed the connection without a response')); });
+  });
+}
+
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const parsed = parse(process.argv.slice(2));
+    if (parsed.help) console.log(HELP);
+    else if (parsed.dryRun) console.log(parsed.format === 'text' ? formatPreview(parsed.request.input) : JSON.stringify({dryRun:true, validation:'cli-options-only', request:parsed.request}));
+    else if (parsed.retry) {
+      const socket = parsed.socketPath || defaultSocketPath();
+      const current = await sendRequest(socket, {command:'list'});
+      if (!current.ok) fail(current.error || 'Could not list jobs');
+      const task = current.data.find(task => task.id === parsed.retry.id);
+      if (!task) fail('Scheduled task not found');
+      const result = await sendRequest(socket, {command:'retry_task', id:task.id, start_at:parsed.retry.startAt, expected_last_run_id:task.lastRunId || null});
+      if (!result.ok) fail(result.error || 'Could not retry job');
+      console.log(JSON.stringify(result.data));
+    }
+    else if (parsed.service) {
+      if (parsed.service === 'start') {
+        const socket = defaultSocketPath();
+        let ping;
+        try { ping = await sendRequest(socket, {command:'ping'}); } catch { /* No daemon to hand off. */ }
+        if (ping?.ok && ping.data?.daemon && !ping.data.managedBySystemd) {
+          const active = await sendRequest(socket, {command:'active_runs'});
+          if (!active.ok || active.data.length) fail('The standalone daemon has active work. Stop its runs before transferring to systemd.');
+          const stopped = await sendRequest(socket, {command:'shutdown'});
+          if (!stopped.ok) {
+            // One-time migration for earlier Noai daemons without a shutdown command.
+            if (!String(stopped.error).includes('unknown variant')) fail(stopped.error || 'Cannot stop daemon');
+            const info = await sendRequest(socket, {command:'poll_events',since:0});
+            const pid = info.data?.instance;
+            if (!Number.isSafeInteger(pid) || pid <= 1) fail('Cannot identify the older daemon safely');
+            const executable = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, '');
+            const argumentsList = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+            if (executable !== defaultBinary() || !argumentsList.includes('--daemon')) fail('The socket owner is not this Noai daemon');
+            process.kill(pid,'SIGTERM');
+          }
+          for(let attempt=0;attempt<30;attempt++) {
+            await new Promise(resolve=>setTimeout(resolve,100));
+            try { await sendRequest(socket, {command:'ping'}); } catch { break; }
+          }
+        }
+      }
+      console.log(manageService(parsed.service, parsed.binary));
+    }
+    else {
+      const response = await sendRequest(parsed.socketPath ?? defaultSocketPath(), parsed.request);
+      if (!response.ok) fail(response.error || 'Noai rejected the request');
+      console.log(JSON.stringify(response.data));
+    }
+  } catch (error) {
+    console.error(`noai: ${error.message}`);
+    process.exitCode = 1;
+  }
+}

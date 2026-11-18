@@ -1,0 +1,98 @@
+/* The topbar is outside .main-content. Sticky navigation is relative to that
+   actual scrollport, so its offset must be zero rather than the header height. */
+.session-detail-nav { position: sticky; top: 0; z-index: 12; min-height: 68px; padding: 12px 0; margin: 0 0 28px; background: var(--canvas); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.session-detail-view, .job-detail-view, .job-conversation-view { padding-top: 0; }
+.main-content { scroll-padding-top: 88px; }
+.page-view.home-view { width: min(100%, 1180px); padding-top: 42px; }
+.home-view .page-heading h2 { font-size: clamp(30px,4vw,42px); }
+.metrics-controls { gap: 14px; padding: 18px 0; border-block: 1px solid var(--line); }
+.metrics-controls label { font-size: 12px; }
+.metrics-stat { padding: 22px; border-radius: 16px; gap: 12px; }
+.metrics-stat-value { font-size: clamp(22px,2.5vw,30px); letter-spacing: -.035em; }
+.metrics-stat small { font-size: 12px; line-height: 1.6; color: var(--ink-soft); }
+.metric-label { color: var(--ink-soft); font-size: 12px; }
+.metrics-insights { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; margin: 30px 0; }
+.insight-card { min-width: 0; padding-left: 16px; border-left: 3px solid var(--line-strong); }
+.insight-card strong { display: block; font-size: 18px; margin: 9px 0; overflow-wrap: anywhere; font-weight: 550; }
+.insight-card p { margin: 0; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+.chart-mode { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin: 0 0 18px; font-size: 12px; }
+.chart-mode select { min-width: 100px; }
+.metrics-figure { padding: 24px; border-radius: 18px; margin: 24px 0; }
+.metrics-figure h3, .metrics-tools-section h3, .session-stats h3 { font-size: 16px; font-weight: 550; }
+.metrics-chart { min-height: 0; }
+.metrics-status, .metrics-figure figcaption, .metrics-daily-note { font-size: 12px; color: var(--ink-soft); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 12px; color: var(--ink-soft); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+:root { --chart-input: #50749b; --chart-cache: #67834d; --chart-output: #a46797; }
+:root[data-theme='dark'] { --chart-input: #8eb8e0; --chart-cache: #b0cb89; --chart-output: #d9a4ca; }
+.series-uncached { fill: var(--chart-input); background: var(--chart-input); }
+.series-cached { fill: var(--chart-cache); background: var(--chart-cache); }
+.series-output { fill: var(--chart-output); background: var(--chart-output); }
+.series-cost, .series-tools { fill: var(--accent); background: var(--accent); }
+.series-stroke-uncached { stroke: var(--chart-input); }
+.series-stroke-cached { stroke: var(--chart-cache); }
+.series-stroke-output { stroke: var(--chart-output); }
+.series-stroke-cost, .series-stroke-tools { stroke: var(--accent); }
+.series-line { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
+.metrics-chart [tabindex]:focus, .metrics-chart [tabindex]:hover { stroke: var(--ink); stroke-width: 2px; outline: none; }
+.chart-label { fill: var(--ink-soft); }
+.chart-readout { min-height: 38px; margin: 8px 0; font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+.chart-data { font-size: 12px; color: var(--ink-soft); margin: 12px 0; }
+.chart-data summary, .metrics-daily-section > summary, .job-technical > summary { cursor: pointer; padding: 10px 0; }
+.chart-data .metrics-table-wrap { max-height: 280px; margin-top: 12px; }
+.metrics-tool-label, .metrics-table, .metrics-tool { font-size: 12px; }
+.metrics-table th { color: var(--ink-soft); }
+.session-stats { border: 0; padding: 24px 0; margin: 0; }
+.session-stats > .session-stats-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; padding: 20px 0; }
+.session-stats > .session-stats-grid dd, #job-content .session-stats > .session-stats-grid dd { font-size: 26px; margin-top: 8px; }
+.session-stats dt { font-size: 12px; color: var(--ink-soft); }
+.session-stats-more { font-size: 13px; border-block: 1px solid var(--line); padding: 12px 0; margin-top: 28px; }
+.session-stats-more .session-stats-grid dd { font-size: 15px; }
+.session-stats-more .scheduled-card-subtitle { font-size: 12px; color: var(--ink-soft); line-height: 1.6; }
+.detail-tools { display: grid; gap: 12px; margin: 24px 0; }
+.detail-tools h3 { margin: 0 0 4px; }
+.job-technical { margin: 20px 0; font-size: 13px; color: var(--ink-soft); }
+.job-technical dl { padding-top: 16px; }
+.job-overview { grid-template-columns: 1fr 1fr; }
+.job-overview > div:last-child { grid-column: 1 / -1; }
+#job-content .job-overview dd { font-size: 18px; }
+#job-content .job-overview dt { font-size: 12px; }
+.job-prompt { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 22px; }
+#session-transcript { display: flex; flex-direction: column; gap: 22px; }
+.session-message { align-self: flex-start; width: auto; max-width: 90%; padding: 18px 22px; border: 1px solid var(--line); border-radius: 22px 22px 22px 5px; background: var(--surface); }
+.session-message.is-user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-radius: 22px 22px 5px 22px; margin: 0; }
+.session-message.is-user .session-message-text, .session-message.is-user header strong, .session-message.is-user time { color: inherit; }
+.session-message header { align-items: center; flex-wrap: wrap; gap: 12px; }
+.session-message header time { flex: 1; }
+.session-message-text { font-size: 14px; line-height: 1.75; }
+.session-message summary { padding: 8px 0; }
+.session-meta, .session-file { color: var(--ink-soft); }
+button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+@media (max-width: 720px) {
+  .page-view.home-view { padding-top: 28px; }
+  .metrics-insights { grid-template-columns: 1fr; gap: 20px; }
+  .metrics-stat { padding: 16px; }
+  .metrics-figure { padding: 16px 10px; }
+  .metrics-chart { min-width: 0; }
+  .session-detail-nav { gap: 8px; min-height: 64px; }
+  .session-detail-view, .job-detail-view, .job-conversation-view { padding-top: 0; }
+  .session-stats > .session-stats-grid { gap: 12px; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .session-stats > .session-stats-grid dd, #job-content .session-stats > .session-stats-grid dd { font-size: 22px; }
+  .session-message { max-width: 96%; padding: 16px; }
+  .job-overview { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+.metrics-job-summary { color: var(--ink-soft); font-size: 13px; line-height: 1.7; margin: 22px 0; padding: 16px 20px; background: var(--surface-subtle); border-radius: 12px; }
+.home-view .metrics-controls .chart-mode-control { flex: .55 1 80px; }
+.home-view .metrics-status { margin: 0; }
+.home-view .metrics-stat { padding: 18px; }
+.home-view .metrics-insights { margin: 24px 0; }
+.home-view .page-heading { margin-bottom: 24px; }
+#job-content .job-overview { gap: 16px 24px; margin-bottom: 20px; }
+#job-content .job-overview > div:last-child { grid-column: auto; }
+#job-content .job-overview { grid-template-columns: repeat(3,minmax(0,1fr)); }
+@media (max-width: 720px) { #job-content .job-overview { grid-template-columns: 1fr; } }
+.metrics-chart rect, .metrics-chart circle { stroke: none; }
+@media (max-width: 720px) { .metrics-chart .chart-label { font-size: 24px; } }
+.session-message.is-user details { color: inherit; }

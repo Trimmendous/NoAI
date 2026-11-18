@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0e0e0f" />
+    <meta name="description" content="Noai — a quiet place to work with coding agents." />
+    <title>Noai</title>
+    <script src="./js/theme-init.js"></script>
+    <link rel="stylesheet" href="./styles/main.css" />
+    <script src="./js/main.js" type="module"></script>
+    <script src="./js/components/job-guide.js" type="module"></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
+        <div class="sidebar-top">
+          <div class="brand-row">
+            <a class="brand" href="#home" aria-label="Noai home" data-view="home">
+              <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span class="brand-name">noai<span class="brand-period">.</span></span>
+            </a>
+            <button id="sidebar-toggle" class="icon-button sidebar-close" type="button" aria-label="Close sidebar" aria-controls="sidebar" aria-expanded="true">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
+          </div>
+
+          <button id="choose-project" class="project-picker" type="button" aria-label="Choose project">
+            <span class="project-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
+            <span class="project-copy"><span class="eyebrow">Current project</span><span id="project-label" class="project-name">Choose a folder</span></span>
+            <svg class="project-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10 3 3 3-3" /></svg>
+          </button>
+
+          <nav class="primary-nav" aria-label="Main">
+            <button class="nav-item" type="button" data-view="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11H3zM9 21v-8h6v8" /></svg><span>Home</span></button>
+            <button class="nav-item is-active" type="button" data-view="chat" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-14a2 2 0 0 1 2-2z" /><path d="M8 10h8M8 14h5" /></svg><span>Chat</span></button>
+            <button class="nav-item" type="button" data-view="accounts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></svg><span>Accounts</span></button>
+            <button class="nav-item" type="button" data-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18.5h16M5.5 15l4-4 3 2 5.5-6" /><circle cx="18" cy="7" r="1" /></svg><span>Activity</span></button>
+            <button class="nav-item" type="button" data-view="jobs"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4m8-4v4M4 10h16m-12 5h3m2 0h3" /></svg><span>Jobs</span></button>
+            <button class="nav-item" type="button" data-view="sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M9 9v11" /></svg><span>Sessions</span></button>
+          </nav>
+        </div>
+
+        <div class="conversation-section">
+          <div class="section-heading"><span>Conversations</span><button id="new-chat" class="icon-button new-chat-button" type="button" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div>
+          <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 5 5" /></svg><span class="sr-only">Search conversations</span><input id="conversation-search" type="search" placeholder="Search conversations" autocomplete="off" /></label>
+          <div id="conversation-list" class="conversation-list" aria-label="Conversations"><p class="conversation-empty">Your conversations will appear here.</p></div>
+        </div>
+
+        <div class="sidebar-bottom">
+          <button id="open-settings" class="nav-item settings-trigger" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg><span>Settings</span></button>
+          <div class="runtime-row"><span class="status-dot" aria-hidden="true"></span><span id="runtime-label">Connecting to local runtime…</span></div>
+        </div>
+      </aside>
+
+      <div class="main-frame">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="icon-button mobile-menu" type="button" aria-label="Open sidebar" aria-controls="sidebar" aria-expanded="false" data-action="toggle-sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
+            <span class="breadcrumb-project" id="header-project">No project</span><span class="breadcrumb-divider" aria-hidden="true">/</span><h1 id="main-title">New chat</h1>
+          </div>
+          <div class="topbar-actions">
+            <button id="rename-chat" class="icon-button chat-action" type="button" aria-label="Rename conversation" title="Rename conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 11-11 4 4L8 20H4v-4ZM13 7l4 4" /></svg></button>
+            <button id="delete-chat" class="icon-button chat-action danger-action" type="button" aria-label="Delete conversation" title="Delete conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg></button>
+            <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle color theme" title="Toggle color theme"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z" /></svg></button>
+            <button id="details-toggle" class="icon-button" type="button" aria-label="Show details" aria-controls="details-panel" aria-expanded="false" title="Show details"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></svg></button>
+          </div>
+        </header>
+
+        <div class="content-frame">
+          <main class="main-content">
+            <section id="view-chat" class="chat-view" aria-label="Chat">
+              <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+              <div id="chat-welcome" class="chat-welcome">
+                <div class="welcome-mark" aria-hidden="true"><span class="brand-mark"><span></span><span></span><span></span></span></div>
+                <p class="welcome-kicker">A clear space to build</p>
+                <h2>What are we working on?</h2>
+                <p class="welcome-description">Ask your coding agent to explore, explain, or make a change. Without a chosen project, Noai creates a fresh folder for the conversation.</p>
+                <div class="starter-list" aria-label="Suggested prompts">
+                  <button type="button" data-prompt="Help me understand this codebase"><span>Explore the codebase</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></button>
+                  <button type="button" data-prompt="Find and fix a bug in this project"><span>Find and fix a bug</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></button>
+                  <button type="button" data-prompt="Plan a new feature for this project"><span>Plan a feature</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></button>
+                </div>
+              </div>
+              <div class="composer-dock">
+                <form id="composer-form" class="composer" autocomplete="off">
+                  <label for="prompt-input" class="sr-only">Message Noai</label>
+                  <textarea id="prompt-input" rows="3" placeholder="Ask anything about your project…" aria-describedby="composer-status"></textarea>
+                  <label class="permission-control"><input id="chat-bypass-permissions" type="checkbox" /><span><strong id="chat-bypass-label">Dangerously bypass permissions</strong><small id="chat-bypass-description">Allow agent tools to run without approval.</small></span></label>
+                  <div class="composer-toolbar">
+                    <div class="composer-selects">
+                      <label class="select-wrap"><span class="sr-only">Coding agent</span><select id="harness-select" aria-label="Coding agent"><option value="">Choose agent</option></select></label>
+                      <label class="select-wrap model-select-wrap"><span class="sr-only">Model</span><select id="model-select" aria-label="Model"><option value="">Default model</option></select></label>
+                    </div>
+                    <div class="composer-actions">
+                      <button id="stop-button" class="stop-button" type="button" hidden>Stop</button>
+                      <button id="send-button" class="send-button" type="submit" aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button>
+                    </div>
+                  </div>
+                </form>
+                <p id="composer-status" class="composer-status" role="status">Enter to send · A fresh folder is created when no project is chosen.</p>
+              </div>
+            </section>
+
+            <section id="view-accounts" class="page-view" aria-labelledby="accounts-title" hidden>
+              <div class="page-heading page-heading-with-action"><div><p class="page-kicker">Connections</p><h2 id="accounts-title">Accounts &amp; usage</h2><p>See your coding agents, account plans, and reported usage when available.</p></div><button id="refresh-accounts" class="secondary-button" type="button">Refresh</button></div>
+              <div id="account-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◌</span><h3>Checking your accounts</h3><p>Connected agents and usage will appear here.</p></div></div>
+            </section>
+
+            <section id="view-home" class="page-view home-view" aria-labelledby="home-title" hidden>
+              <div class="page-heading"><p class="page-kicker">Your local workspace</p><h2 id="home-title">A little perspective.</h2><p>Explore your agents’ activity, one useful signal at a time.</p></div>
+              <section class="metrics-section" aria-labelledby="metrics-title">
+                <div class="scheduled-list-heading"><h3 id="metrics-title">Usage &amp; tools</h3><button id="metrics-refresh" class="secondary-button" type="button">Refresh metrics</button></div>
+                <p id="metrics-status" class="metrics-status" role="status">Loading local agent history and Noai activity.</p>
+                <div class="metrics-controls">
+                  <label>Harness<select id="metrics-harness" class="text-field"><option value="">All harnesses</option></select></label>
+                  <label>Model<select id="metrics-model" class="text-field"><option value="">All models</option></select></label>
+                  <label>Period<select id="metrics-range" class="text-field"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="31d">Last 31 days</option><option value="all">All time</option></select></label>
+                  <label>Chart<select id="metrics-value" class="text-field"><option value="total">Total tokens</option><option value="cost">Recorded cost (USD)</option><option value="tools">Tool events</option></select></label>
+                <label class="chart-mode-control">Display<select id="metrics-style" class="text-field"><option value="bar">Bar</option><option value="line">Line</option></select></label>
+                </div>
+                <div id="metrics-totals" class="metrics-totals"></div>
+                <p id="metrics-job-summary" class="metrics-job-summary" role="status"></p>
+                <div id="metrics-insights" class="metrics-insights"></div>
+                <figure class="metrics-figure"><h3>Usage over time</h3><div id="metrics-chart"></div><figcaption id="metrics-chart-caption"></figcaption></figure>
+                <details class="metrics-daily-section"><summary>Explore daily totals</summary><section aria-labelledby="metrics-daily-title"><h3 id="metrics-daily-title">Daily totals</h3><div class="metrics-table-wrap"><table class="metrics-table metrics-daily-table"><thead><tr><th scope="col">Date</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cached input</th><th scope="col">Total tokens</th><th scope="col">Tool events</th></tr></thead><tbody id="metrics-daily"></tbody></table><p id="metrics-daily-empty" class="metrics-empty">No recorded activity for these filters.</p></div><p class="metrics-daily-note">Dates use your local time. Cached input is included in input and total tokens.</p></section></details>
+                <section class="metrics-tools-section" aria-label="Tool activity breakdown"><h3>Tool activity</h3><div id="metrics-tools" class="metrics-tools"></div></section>
+                <div class="metrics-table-wrap"><table class="metrics-table"><thead><tr><th scope="col">Harness</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Tool events</th><th scope="col">Sessions / runs</th></tr></thead><tbody id="metrics-breakdown"></tbody></table><p id="metrics-breakdown-empty" class="metrics-empty">No recorded activity for these filters.</p></div>
+              </section>
+            </section>
+            <section id="view-activity" class="page-view" aria-labelledby="activity-title" hidden>
+              <div class="page-heading"><p class="page-kicker">Timeline</p><h2 id="activity-title">Activity</h2><p>Follow what your coding agents have been doing across conversations.</p></div>
+              <section id="jobs-section" class="jobs-section" aria-labelledby="jobs-title" hidden><h3 id="jobs-title">Waiting &amp; scheduled</h3><div id="resume-list" class="page-list"></div></section>
+              <div id="activity-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◇</span><h3>No activity yet</h3><p>Start a conversation to see activity here.</p></div></div>
+            </section>
+            <section id="view-sessions" class="page-view sessions-view" aria-labelledby="sessions-heading" hidden>
+              <div class="page-heading"><p class="page-kicker">Your workspace</p><h2 id="sessions-heading">Sessions</h2><p>Every conversation, in one place. Pick up the story behind any session.</p></div>
+              <div class="sessions-toolbar">
+                <label class="sessions-search"><span class="sr-only">Search sessions</span><input id="sessions-search" class="text-field" type="search" placeholder="Search sessions, projects, models…" /></label>
+                <label><span class="sr-only">Session harness</span><select id="sessions-harness" class="text-field"><option value="">All agents</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label>
+                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="text-field"><option value="recent">Recently updated</option><option value="oldest">Oldest first</option><option value="title">Name</option></select></label>
+                <button id="sessions-refresh" class="secondary-button" type="button">Refresh</button>
+              </div>
+              <div class="sessions-list-meta"><span id="sessions-count"></span><span id="sessions-status" role="status"></span></div>
+              <div class="sessions-table-wrap"><table class="sessions-table"><caption class="sr-only">Local sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Project</th><th scope="col">Agent / model</th><th scope="col">Messages</th><th scope="col">Updated</th></tr></thead><tbody id="sessions-body"></tbody></table></div>
+              <p id="sessions-empty" class="scheduled-empty" hidden>No sessions match. Try a different search or agent.</p>
+              <nav class="scheduled-pagination sessions-pagination" aria-label="Session pages"><button id="sessions-previous" class="secondary-button" type="button">Previous</button><span id="sessions-page"></span><button id="sessions-next" class="secondary-button" type="button">Next</button></nav>
+            </section>
+            <section id="view-session" class="page-view session-detail-view" aria-labelledby="session-heading" hidden>
+              <div class="session-detail-nav"><button id="session-back" class="secondary-button" type="button">← All sessions</button><button id="session-refresh" class="secondary-button" type="button">Refresh session</button></div>
+              <div class="page-heading"><p id="session-agent" class="page-kicker"></p><h2 id="session-heading"></h2><p id="session-project"></p><p id="session-meta" class="session-meta"></p></div>
+              <button id="session-open-conversation" class="primary-button" type="button">Open conversation</button>
+              <details id="session-original-prompt" class="job-prompt" hidden><summary>Original recorded prompt</summary><p class="scheduled-card-instructions"></p></details>
+              <section id="session-statistics" class="session-stats" aria-label="Session stats"></section>
+              <details class="session-file"><summary>Session details</summary><p id="session-source"></p></details>
+              <div id="session-conversation" hidden><h3 class="session-conversation-heading">Conversation</h3>
+              <p id="session-detail-status" role="status"></p><div id="session-transcript"></div><button id="session-load-more" class="secondary-button" type="button" hidden>Load more messages</button></div>
+            </section>
+            <section id="view-job" class="page-view job-detail-view" aria-labelledby="job-heading" hidden>
+              <div class="session-detail-nav"><button id="job-back" class="secondary-button" type="button">← Back to Jobs</button><button id="job-refresh" class="secondary-button" type="button">Refresh job</button></div>
+              <div class="page-heading"><p class="page-kicker">Job details</p><h2 id="job-heading" tabindex="-1"></h2></div>
+              <div id="job-content"></div>
+            </section>
+            <section id="view-job-conversation" class="page-view job-conversation-view" aria-labelledby="job-conversation-heading" hidden>
+              <div class="session-detail-nav"><button id="job-conversation-back" class="secondary-button" type="button">← Back to job</button></div>
+              <div class="page-heading"><p class="page-kicker">Conversation</p><h2 id="job-conversation-heading" tabindex="-1"></h2></div>
+              <div id="job-conversation-stream" class="job-conversation-stream"></div>
+            </section>
+            <section id="view-jobs" class="page-view scheduled-view" aria-labelledby="scheduled-title" hidden>
+              <div class="page-heading"><p class="page-kicker">Automation</p><h2 id="scheduled-title">Jobs</h2><p>A little work off your plate. Follow your scheduled jobs and see how each run went.</p></div>
+              <details class="job-guide" id="job-guide">
+                <summary>Your first job · desktop and CLI guide</summary>
+                <p>Read this guide without launching an agent or using provider allowance. Close it to skip; open it again any time.</p>
+                <button id="job-practice-start" class="secondary-button" type="button">Try sample walkthrough</button>
+                <section id="job-practice" class="job-practice" aria-labelledby="job-practice-heading" hidden>
+                  <p>Practice only · Built-in sample data · No agent runs</p>
+                  <h3 id="job-practice-heading" tabindex="-1"></h3>
+                  <p id="job-practice-summary"></p><p id="job-practice-body"></p>
+                  <div class="job-practice-actions">
+                    <button id="job-practice-back" class="secondary-button" type="button">Previous step</button>
+                    <button id="job-practice-next" class="secondary-button" type="button">Next step</button>
+                    <button id="job-practice-skip" class="secondary-button" type="button">Skip practice</button>
+                  </div>
+                </section>
+                <ol>
+                  <li><strong>Prepare your agent.</strong> Choose an installed Codex or Claude CLI, complete its sign-in in a terminal, and check the app’s Accounts page. A job uses that agent’s account and may consume its allowance.</li>
+                  <li><strong>Describe a small task.</strong> In New job below, try “Summarize this project.” Choose your project folder, or leave it blank for a new folder. Keep One time for your first run. For Codex inspection tasks, choose read-only permissions.</li>
+                  <li><strong>Review before starting.</strong> Create job with Run now starts real work. To practice CLI syntax safely, run this from the Noai repository:</li>
+                </ol>
+                <fieldset class="job-guide-inputs">
+                  <legend>Customize a safe CLI preview (Bash / POSIX shell)</legend>
+                  <label>Practice title<input id="job-guide-title" value="First review" /></label>
+                  <label>Practice prompt<textarea id="job-guide-prompt" rows="2">Summarize this project</textarea></label>
+                  <label>Practice project folder<input id="job-guide-project" value="." /></label>
+                  <p>These fields only change the command below. Nothing is submitted or saved. Leave the folder blank to preview a new project.</p>
+                  <p id="job-guide-validation" role="status"></p>
+                </fieldset>
+                <pre><code>./bin/noai jobs create --title "First review" --prompt "Summarize this project" --project . --permissions read-only --dry-run true</code></pre>
+                <button id="job-guide-copy" class="secondary-button" type="button">Copy safe CLI command</button>
+                <span id="job-guide-copy-status" role="status"></span>
+                <p>The readable preview validates CLI options only; omit <code>--format text</code> for stable JSON. It does not connect to Noai, create a folder, check sign-in or run an agent. Remove <code>--dry-run true --format text</code> when ready to create the real job.</p>
+                <p><strong>Follow the result.</strong> Open the job, select its run and use Open conversation. In a terminal, use <code>./bin/noai jobs list</code>, then <code>./bin/noai jobs runs TASK_ID</code>. If the CLI cannot connect, open Noai or start your already-installed user service. Fix sign-in or other reported errors before using <code>./bin/noai jobs retry TASK_ID</code> for an eligible failed, paused or cancelled job.</p>
+                <p><strong>Repeating work:</strong> Days and CLI <code>--every 1d</code> currently mean 86400 seconds; the local hour can shift at daylight-saving changes.</p>
+              </details>
+              <div class="scheduled-list-heading"><h3>Your jobs</h3><a class="scheduled-new-job" href="#scheduled-form">New job</a><button id="scheduled-refresh" class="secondary-button" type="button">Refresh</button></div>
+              <div id="scheduled-list" class="page-list" aria-live="polite"><div class="content-placeholder"><h3>Loading jobs</h3><p>Your saved jobs will appear here.</p></div></div>
+              <form id="scheduled-form" class="scheduled-form" autocomplete="off">
+                <div class="scheduled-form-heading"><h3 id="scheduled-form-title">New job</h3><p>Each run starts a fresh conversation and saves its result here.</p></div>
+                <div class="scheduled-grid">
+                  <label class="scheduled-field"><span>Title</span><input id="scheduled-title-input" class="text-field" type="text" maxlength="160" placeholder="e.g. Review open issues" required /></label>
+                  <label class="scheduled-field scheduled-field-wide"><span>Instructions</span><textarea id="scheduled-prompt" class="text-field" rows="5" placeholder="Tell the agent what to do…" required></textarea></label>
+                  <label class="scheduled-field"><span>Agent</span><select id="scheduled-harness" class="text-field" required></select></label>
+                  <div class="scheduled-field"><label for="scheduled-model">Model</label><select id="scheduled-model" class="text-field"><option value="">Agent default</option></select><label id="scheduled-custom-model-label" for="scheduled-custom-model" hidden>Custom model ID</label><input id="scheduled-custom-model" class="text-field" type="text" placeholder="Exact model ID" spellcheck="false" hidden /></div>
+                  <label class="scheduled-field scheduled-field-wide"><span>Project folder <small>(optional)</small></span><input id="scheduled-project" class="text-field" type="text" placeholder="Leave empty for a new job folder" spellcheck="false" /><small>Leave empty to create a separate folder for this job under ~/.noai.</small><button id="scheduled-current-project" type="button" class="scheduled-link-button">Use current project</button></label>
+                </div>
+                <fieldset class="scheduled-choice"><legend>Start</legend><label><input type="radio" name="scheduled-start" value="now" checked /> Run now</label><label><input type="radio" name="scheduled-start" value="later" /> At a chosen time</label></fieldset>
+                <label id="scheduled-time-wrap" class="scheduled-field scheduled-time-wrap" hidden><span>Start time <small>(your local time)</small></span><input id="scheduled-time" class="text-field" type="datetime-local" step="1" aria-describedby="scheduled-time-help" /><small id="scheduled-time-help">Clock-change gaps are rejected. If an hour repeats, the first occurrence is used. To select the second, use CLI --at with an explicit timezone offset.</small></label>
+                <fieldset class="scheduled-choice"><legend>Repeat</legend><label><input type="radio" name="scheduled-repeat" value="once" checked /> One time</label><label><input type="radio" name="scheduled-repeat" value="interval" /> Every interval</label></fieldset>
+                <div id="scheduled-interval-wrap" class="scheduled-interval-wrap" hidden><label class="scheduled-field"><span>Every</span><input id="scheduled-interval" class="text-field" type="number" min="1" step="1" value="1" inputmode="numeric" /></label><label class="scheduled-field"><span>Unit</span><select id="scheduled-interval-unit" class="text-field"><option value="3600">Hours</option><option value="60">Minutes</option><option value="86400">Days</option><option value="1">Seconds</option></select></label></div>
+                <label class="scheduled-field"><span>Job permissions</span><select id="scheduled-permissions" class="text-field"></select><small id="scheduled-permissions-description"></small></label>
+                <label class="permission-control"><input id="scheduled-bypass-permissions" type="checkbox" /><span><strong id="scheduled-bypass-label">Dangerously bypass permissions for Codex</strong><small id="scheduled-bypass-description">Skip tool approvals and the Codex sandbox.</small></span></label>
+                <label class="scheduled-auto-resume"><input id="scheduled-auto-resume" type="checkbox" /> Automatically resume if the agent hits a timed limit</label>
+                <div class="scheduled-form-actions"><span id="scheduled-form-status" role="status"></span><button id="scheduled-edit-cancel" class="secondary-button" type="button" hidden>Cancel editing</button><button id="scheduled-submit" class="primary-button" type="submit">Create job</button></div>
+              </form>
+            </section>
+          </main>
+
+          <aside id="details-panel" class="details-panel" aria-label="Conversation details" hidden>
+            <div class="details-heading"><div><p class="eyebrow">Context</p><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+            <div id="details-content" class="details-content"><p class="details-empty">Project and conversation details will appear here.</p></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><div><p class="page-kicker">Make it yours</p><h2 id="settings-title">Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+      <div class="dialog-body">
+        <fieldset class="settings-group"><legend>Appearance</legend><p>Choose how Noai looks on this device.</p><div id="theme-options" class="segmented-options" role="radiogroup" aria-label="Appearance"><label><input type="radio" name="theme" value="system" /><span>System</span></label><label><input type="radio" name="theme" value="light" /><span>Light</span></label><label><input type="radio" name="theme" value="dark" /><span>Dark</span></label></div></fieldset>
+        <fieldset class="settings-group"><legend>Accent color</legend><p>A small touch of color throughout your workspace.</p><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent color"><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label></div></fieldset>
+        <fieldset class="settings-group automation-group"><legend>Automation</legend><p>Choose what happens when work has to wait or you close the window.</p><label class="setting-toggle"><input id="auto-resume-setting" type="checkbox" /><span><strong>Automatically resume after timed limits</strong><small>Continue a waiting task when its limit resets.</small></span></label><label class="setting-toggle"><input id="background-mode-setting" type="checkbox" /><span><strong>Keep the window in the tray when closed</strong><small>Closing or quitting the window does not stop the scheduler service.</small></span></label></fieldset>
+      </div>
+    </dialog>
+    <dialog id="model-dialog" class="model-dialog" aria-labelledby="model-dialog-title">
+      <form id="custom-model-form" method="dialog">
+        <div class="dialog-heading"><div><p class="page-kicker">Model</p><h2 id="model-dialog-title">Use a custom model</h2></div></div>
+        <div class="dialog-body"><label class="field-label" for="custom-model-input">Model ID</label><input id="custom-model-input" class="text-field" name="model" type="text" placeholder="Enter a model ID" required autocomplete="off" spellcheck="false" /><p class="field-help">Use the exact model ID supported by your selected agent.</p></div>
+        <div class="dialog-actions"><button id="model-cancel" class="secondary-button" type="button">Cancel</button><button id="model-save" class="primary-button" type="submit">Use model</button></div>
+      </form>
+    </dialog>
+    <dialog id="edit-dialog" class="edit-dialog" aria-labelledby="edit-title">
+      <form id="edit-form" method="dialog">
+        <div class="dialog-heading"><div><p class="page-kicker">Conversation</p><h2 id="edit-title">Rename conversation</h2></div></div>
+        <div class="dialog-body"><p id="edit-description" class="dialog-description">Choose a name for this conversation.</p><label id="edit-label" class="field-label" for="edit-input">Conversation name</label><input id="edit-input" class="text-field" name="title" type="text" maxlength="160" autocomplete="off" /></div>
+        <div class="dialog-actions"><button id="edit-cancel" class="secondary-button" type="button">Cancel</button><button id="edit-confirm" class="primary-button" type="submit">Save</button></div>
+      </form>
+    </dialog>
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
+  </body>
+</html>
