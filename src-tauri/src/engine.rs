@@ -1,7 +1,7 @@
 use crate::adapters::{self, RunEvent, RunRequest};
 use crate::{
     providers,
-    scheduled_tasks::{CreateTaskInput, ScheduledTasks, Task, TaskRun},
+    scheduled_tasks::{CreateTaskInput, DigestInput, ScheduledTasks, Task, TaskRun},
     scheduler::{self, ResumeJob, Scheduler},
 };
 use std::{
@@ -104,20 +104,7 @@ fn kill_tree(pid: Option<u32>) {
     let Some(pid) = pid else {
         return;
     };
-    #[cfg(unix)]
-    // SAFETY: each CLI is started as a fresh process-group leader above.
-    unsafe {
-        libc::kill(-(pid as i32), libc::SIGKILL);
-    }
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
+    crate::platform::kill_process_tree(pid);
 }
 
 pub async fn start_run(engine: Arc<Engine>, mut request: RunRequest) -> Result<(), String> {
@@ -312,6 +299,34 @@ fn launch_reserved(
         engine.emit_run(terminal);
     });
     Ok(())
+}
+
+pub fn get_digest(engine: Arc<Engine>) -> serde_json::Value {
+    serde_json::json!({
+        "task": engine.scheduled_tasks.digest(),
+        "runs": engine.scheduled_tasks.digest_runs(30),
+    })
+}
+
+pub fn set_digest(engine: Arc<Engine>, input: DigestInput) -> Result<Task, String> {
+    let folder = engine.home.join(".noai").join("digest");
+    std::fs::create_dir_all(&folder).map_err(|error| format!("Cannot create digest folder: {error}"))?;
+    let project = folder.canonicalize().map_err(|error| error.to_string())?;
+    let task = engine
+        .scheduled_tasks
+        .set_digest(input, project.to_string_lossy().into_owned())?;
+    engine.emit_task(task.clone());
+    Ok(task)
+}
+
+pub fn run_digest_now(engine: Arc<Engine>) -> Result<Task, String> {
+    let task = engine.scheduled_tasks.run_digest_now()?;
+    engine.emit_task(task.clone());
+    let launcher = engine.clone();
+    tokio::spawn(async move {
+        run_scheduled_due(&launcher).await;
+    });
+    Ok(task)
 }
 
 pub fn get_resume_jobs(engine: Arc<Engine>) -> Vec<ResumeJob> {
@@ -959,7 +974,13 @@ async fn run_scheduled_due(engine: &Arc<Engine>) {
             return;
         }
     };
-    for (task, request) in claims {
+    for (task, mut request) in claims {
+        if task.kind.as_deref() == Some(crate::scheduled_tasks::DIGEST_KIND)
+            && request.resume_id.is_none()
+        {
+            // Built from live data at launch, so a delayed digest is never stale.
+            request.prompt = crate::digest::compose(&engine.scheduled_tasks, scheduler::now_epoch());
+        }
         engine.emit_task(task);
         let fingerprint = if request.auto_resume {
             providers::refresh_account_fingerprint(&request.harness).await

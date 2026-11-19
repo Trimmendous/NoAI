@@ -65,7 +65,7 @@ export function renderDetails(container, conversation, workspace, running) {
   const fragment = document.createDocumentFragment();
   const items = [
     ['Project', conversation?.projectPath || workspace.projectPath || 'No folder selected'],
-    ['Harness', getHarness(conversation?.harness || 'codex')?.label],
+    ['Harness', getHarness(conversation?.harness)?.label || conversation?.harness || '—'],
     ['Model', conversation?.model || 'Harness default'],
     ['Session', conversation?.resumeId ? 'Native session retained' : 'New session'],
     ['Status', running ? 'Working' : 'Ready'],

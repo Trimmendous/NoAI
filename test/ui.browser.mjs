@@ -21,7 +21,7 @@ await page.addInitScript(()=>{
  window.__TAURI__={event:{listen:async()=>()=>{}},core:{invoke:async(command,args)=>{
   switch(command){
    case 'load_workspace':return null;
-   case 'runtime_status':return {platform:'linux',harnesses:[{id:'codex',installed:true}]};
+   case 'runtime_status':return {platform:'linux',harnesses:[{ id: 'codex', label: 'Codex', installed: true, version: 'fixture', bypassDescription: 'Skip tool approvals and the Codex sandbox.', permissions: [{ id: 'workspace-network', label: 'Project + network', description: 'Fixture' }, { id: 'workspace-write', label: 'Project only · offline', description: 'Fixture' }, { id: 'read-only', label: 'Read only', description: 'Fixture' }, { id: 'provider-default', label: 'Existing CLI settings', description: 'Fixture' }] }]};
    case 'get_activity_metrics':window.__fixture.metricsCalls++;if(window.__fixture.failMetrics || location.search.includes('failMetrics'))throw new Error('Example read failure');return {records,importStatus:{files:50,errors:0}};
    case 'list_local_sessions':return {sessions,errors:0};
    case 'get_local_session':return {records:records.filter(r=>r.sessionId===args.id),messages:Array.from({length:100},(_,n)=>({role:n%5===0?'tool':n%2?'user':'assistant',at:now-n*60,activities:n===2?[{kind:'thinking',text:'Synthetic recorded thinking'},{kind:'tool',text:'Synthetic tool output'}]:[],text:`Synthetic message ${n}. Here is an example of a readable conversation.\n\nA second paragraph gives this bubble enough space for checking long transcripts.`})),nextOffset:null};

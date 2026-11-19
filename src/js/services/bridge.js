@@ -17,11 +17,8 @@ export async function runtimeStatus() {
   if (isNative()) return invoke('runtime_status');
   return {
     platform: 'browser',
-    harnesses: [
-      { id: 'codex', label: 'Codex', installed: false, detail: 'Desktop app required to detect local tools.' },
-      { id: 'claude', label: 'Claude Code', installed: false, detail: 'Desktop app required to detect local tools.' },
-      { id: 'opencode', label: 'OpenCode', installed: false, detail: 'Coming soon.' },
-    ],
+    // Agents are discovered by the desktop app; the browser preview has none.
+    harnesses: [],
   };
 }
 
@@ -116,3 +113,7 @@ export async function getLocalSession(id, offset = 0) { return invoke('get_local
 export async function editScheduledTask(id, input, expectedLastRunId) { return invoke('edit_scheduled_task', {id, input, expectedLastRunId}); }
 
 export async function retryScheduledTask(id, startAt, expectedLastRunId) { return invoke('retry_scheduled_task', {id, startAt, expectedLastRunId}); }
+
+export async function getDigest() { return isNative() ? invoke('get_digest') : { task: null, runs: [] }; }
+export async function setDigest(input) { return invoke('set_digest', { input }); }
+export async function runDigestNow() { return invoke('run_digest_now'); }

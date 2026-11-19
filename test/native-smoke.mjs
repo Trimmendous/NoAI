@@ -45,7 +45,8 @@ else {
   console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'Claude fixture completed safely.'}]}}));
 }
 `, {mode:0o755});
-const env = {...process.env, XDG_DATA_HOME:path.join(root,'data'), PATH:`${fixtures}:${process.env.PATH}`, NOAI_FIXTURE_ARGS:path.join(root,'argv.jsonl')};
+const dataDir = path.join(root,'data','dev.noai.desktop');
+const env = {...process.env, NOAI_DATA_DIR:dataDir, PATH:`${fixtures}:${process.env.PATH}`, NOAI_FIXTURE_ARGS:path.join(root,'argv.jsonl')};
 delete env.OPENROUTER_API_KEY;
 delete env.DISPLAY;
 delete env.WAYLAND_DISPLAY;
@@ -70,7 +71,7 @@ try {
   assert.equal((await stat(generated)).isDirectory(),true);
   assert.equal(future.intervalSeconds,7200);
   assert.equal(future.permissions,'workspace-network');
-  const socket = path.join(env.XDG_DATA_HOME,'dev.noai.desktop','control.sock');
+  const socket = path.join(dataDir,'control.sock');
   const input = {title:'Edited future',prompt:'Edited prompt',harness:'claude',model:'edited-model',projectPath:generated,startAt:Math.floor(Date.now()/1000)+86400,intervalSeconds:90,autoResume:true,dangerouslyBypassPermissions:false};
   const edit = await sendRequest(socket, {command:'edit',id:future.id,input,expected_last_run_id:null});
   assert.equal(edit.ok,true); assert.equal(edit.data.harness,'claude'); assert.equal(edit.data.model,'edited-model'); assert.equal(edit.data.intervalSeconds,90);
@@ -138,12 +139,12 @@ try {
   assert.ok(!claude[0].args.includes('--dangerously-skip-permissions'));
   assert.ok(claude[1].args.includes('--dangerously-skip-permissions'));
   assert.ok(!claude[1].args.includes('dontAsk'));
-  const metrics = await sendRequest(path.join(env.XDG_DATA_HOME,'dev.noai.desktop','control.sock'),{command:'metrics'});
+  const metrics = await sendRequest(path.join(dataDir,'control.sock'),{command:'metrics'});
   assert.equal(metrics.ok,true);
   assert.ok(metrics.data.records.some(row=>row.harness==='codex' && row.usage?.inputTokens===100 && row.usage?.outputTokens===20));
   assert.ok(metrics.data.records.some(row=>row.type==='activity' && row.tool==='command_execution'));
   assert.ok(metrics.data.records.every(row=>row.at>0));
-  const journal=JSON.parse(await readFile(path.join(env.XDG_DATA_HOME,'dev.noai.desktop','scheduled-tasks.json'),'utf8'));
+  const journal=JSON.parse(await readFile(path.join(dataDir,'scheduled-tasks.json'),'utf8'));
   assert.equal(journal.tasks.length,7);
   console.log('Headless native smoke passed (no DISPLAY): CLI socket, UUID folder, future recurrence, persisted settings/cancel, actual CLI fixture run timed auto-resume and normal/bypass argv for both harnesses, recorded token/tool metrics.');
 } finally {

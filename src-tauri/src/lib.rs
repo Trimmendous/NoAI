@@ -1,7 +1,10 @@
 mod adapters;
 mod control;
 mod daemon;
+mod digest;
 mod engine;
+mod harness;
+mod platform;
 mod ipc;
 mod local_metrics;
 mod local_sessions;
@@ -67,6 +70,9 @@ pub fn run() {
             runtime::edit_scheduled_task,
             runtime::cancel_scheduled_task,
             runtime::retry_scheduled_task,
+            runtime::get_digest,
+            runtime::set_digest,
+            runtime::run_digest_now,
             runtime::get_scheduled_task_runs,
             runtime::set_scheduled_task_auto_resume,
             providers::get_provider_usage,

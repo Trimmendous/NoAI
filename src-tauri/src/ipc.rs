@@ -11,18 +11,17 @@ mod unix {
         thread,
         time::Duration,
     };
-    use tauri::{AppHandle, Emitter, Manager};
+    use tauri::{AppHandle, Emitter};
 
     static REPLAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     pub fn replay_events() {
         REPLAY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn socket_path(app: &AppHandle) -> Result<PathBuf, String> {
-        app.path()
-            .app_data_dir()
-            .map(|dir| dir.join("control.sock"))
-            .map_err(|e| e.to_string())
+    // Must be the daemon's own directory, not Tauri's: the daemon runs headless
+    // and resolves its path without an AppHandle.
+    fn socket_path(_app: &AppHandle) -> Result<PathBuf, String> {
+        crate::platform::app_data_dir().map(|dir| dir.join("control.sock"))
     }
 
     fn connect(path: &Path) -> Result<UnixStream, String> {
@@ -44,12 +43,7 @@ mod unix {
         }
         // An installed user service is the preferred owner. A detached local daemon
         // keeps developer builds and portable launches usable too.
-        let _ = Command::new("systemctl")
-            .args(["--user", "start", "noai.service"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        crate::platform::start_user_service();
         for _ in 0..20 {
             if connect(&path).is_ok() {
                 return Ok(());
@@ -57,11 +51,20 @@ mod unix {
             thread::sleep(Duration::from_millis(100));
         }
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        let dir = crate::platform::app_data_dir()?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let log_path = dir.join("daemon.log");
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|e| format!("Cannot open {}: {e}", log_path.display()))?;
+        let log_err = log.try_clone().map_err(|e| e.to_string())?;
         Command::new(executable)
             .arg("--daemon")
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(log)
+            .stderr(log_err)
             .spawn()
             .map_err(|e| format!("Cannot start Noai daemon: {e}"))?;
         for _ in 0..50 {
@@ -70,7 +73,11 @@ mod unix {
             }
             thread::sleep(Duration::from_millis(100));
         }
-        Err("Noai daemon did not start; inspect the user service log".into())
+        Err(format!(
+            "Noai daemon did not open {}; see {}",
+            path.display(),
+            log_path.display()
+        ))
     }
 
     pub fn request<T: DeserializeOwned>(app: &AppHandle, command: Value) -> Result<T, String> {

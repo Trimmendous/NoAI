@@ -27,7 +27,7 @@ test('workspace normalization preserves drafts and custom models and interrupts 
   });
   assert.equal(workspace.conversations[0].messages[0].status, 'interrupted');
   assert.equal(createMessage('assistant', '', { status: 'running' }).status, 'running');
-  assert.deepEqual(createInitialWorkspace().preferences.customModels, { codex: [], claude: [] });
+  assert.deepEqual(createInitialWorkspace().preferences.customModels, {});
 });
 
 test('store snapshots are immutable and subscriptions receive fresh state', () => {

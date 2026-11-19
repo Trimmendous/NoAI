@@ -63,6 +63,11 @@ mod unix {
         PollEvents {
             since: u64,
         },
+        GetDigest,
+        SetDigest {
+            input: crate::scheduled_tasks::DigestInput,
+        },
+        RunDigestNow,
         Ping,
         Shutdown,
         ActiveRuns,
@@ -314,6 +319,9 @@ mod unix {
             )),
             Request::Cancel { id } => result(engine::cancel_scheduled_task(engine, id)),
             Request::Runs { id } => result(engine::get_scheduled_task_runs(engine, id)),
+            Request::GetDigest => json!({"ok": true, "data": engine::get_digest(engine)}),
+            Request::SetDigest { input } => result(engine::set_digest(engine, input)),
+            Request::RunDigestNow => result(engine::run_digest_now(engine)),
             Request::RetryTask {
                 id,
                 start_at,
@@ -340,7 +348,7 @@ mod unix {
             }
             Request::PollEvents { since } => json!({"ok": true, "data": events.since(since)}),
             Request::Ping => {
-                json!({"ok": true, "data": {"daemon": true,"pid":std::process::id(),"managedBySystemd":std::env::var_os("INVOCATION_ID").is_some()}})
+                json!({"ok": true, "data": {"daemon": true,"pid":std::process::id(),"managedBySystemd":std::env::var_os("INVOCATION_ID").is_some(),"managedByService":crate::platform::managed_by_service()}})
             }
             Request::Shutdown => {
                 if !engine.active_runs.snapshot().is_empty() {

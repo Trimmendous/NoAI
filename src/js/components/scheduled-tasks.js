@@ -1,5 +1,5 @@
 import { parseLocalTime } from '../core/schedule-time.js';
-import { HARNESSES, getHarness } from '../core/catalog.js';
+import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel } from '../core/catalog.js';
 import { basename, element } from './dom.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
@@ -8,13 +8,9 @@ const $ = selector => document.querySelector(selector);
 const STATUS = { scheduled: 'Scheduled', running: 'Running', waiting: 'Waiting for reset', completed: 'Succeeded', cancelled: 'Cancelled', needs_attention: 'Paused', paused: 'Paused', failed: 'Failed' };
 const PAGE_SIZE = 10;
 
-const PERMISSIONS = {
-  'workspace-network': ['Project + network', 'Edit files and run commands in the project, with network access. Codex’s sandbox stays enabled; actions outside its permissions are denied without prompting.'],
-  'workspace-write': ['Project only · offline', 'Edit files and run commands in the project. Shell network access is disabled; actions outside the sandbox are denied without prompting.'],
-  'read-only': ['Read only', 'Inspect files without changing them. No interactive approval prompts.'],
-  'provider-default': ['Existing CLI settings', 'Keep the CLI’s configured permissions. Codex exec normally defaults to read-only; Claude denies actions that need approval.'],
-  'auto-review': ['Automatic permission review', 'Claude reviews tool actions automatically. Requires a supported account and model; denials still apply. This is not an operating-system sandbox.'],
-};
+function permissionLabel(harness, id = 'provider-default') {
+  return getHarness(harness)?.permissions.find(mode => mode.id === id)?.label || id || 'Unknown';
+}
 
 export function runStatus(run) {
   if (run.status === 'needs_attention' && run.events?.at(-1)?.type === 'error') return 'failed';
@@ -52,7 +48,7 @@ export function formatScheduledInterval(seconds) {
   return `Every ${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
 }
 
-export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns, getResumeJobs, fetchMetrics, ensureProject, getModels, native, getProjectPath, getAutoResume, getCustomModels, toast, navigate }) {
+export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns, getResumeJobs, fetchMetrics, ensureProject, getModels, native, getProjectPath, getAutoResume, getCustomModels, getRuntime = () => null, toast, navigate }) {
   const form = $('#scheduled-form');
   const listNode = $('#scheduled-list');
   const harnessNode = $('#scheduled-harness');
@@ -86,12 +82,19 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   const runCache = new Map();
   const modelCache = new Map();
 
-  harnessNode.replaceChildren(...HARNESSES.map(harness => {
-    const option = new Option(harness.available ? harness.label : `${harness.label} · coming soon`, harness.id);
-    option.disabled = !harness.available;
-    return option;
-  }));
-  harnessNode.value = 'codex';
+  let harnessTouched = false;
+  const detected = () => getRuntime()?.harnesses || [];
+  function renderHarnessOptions() {
+    const selected = harnessNode.value;
+    harnessNode.replaceChildren(...HARNESSES.map(harness => {
+      const option = new Option(harnessOptionLabel(harness, detected()), harness.id);
+      option.disabled = !harness.available;
+      return option;
+    }));
+    if (selected) harnessNode.value = selected;
+  }
+  renderHarnessOptions();
+  harnessNode.value = preferredHarness(detected());
   $('#scheduled-auto-resume').checked = !!getAutoResume();
   if (!native) {
     submit.disabled = true;
@@ -100,12 +103,13 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
 
   function permissionControls(reset = false) {
     const select = $('#scheduled-permissions');
-    const values = harnessNode.value === 'codex' ? ['workspace-network', 'workspace-write', 'read-only', 'provider-default'] : ['auto-review', 'provider-default'];
+    const modes = getHarness(harnessNode.value)?.permissions || [];
+    const values = modes.map(mode => mode.id);
     const previous = select.value;
-    select.replaceChildren(...values.map(value => new Option(PERMISSIONS[value][0], value)));
+    select.replaceChildren(...modes.map(mode => new Option(mode.label, mode.id)));
     select.value = !reset && values.includes(previous) ? previous : values[0];
     select.disabled = editLocked || $('#scheduled-bypass-permissions').checked;
-    $('#scheduled-permissions-description').textContent = $('#scheduled-bypass-permissions').checked ? 'Explicit permission bypass overrides the selected mode.' : PERMISSIONS[select.value][1];
+    $('#scheduled-permissions-description').textContent = $('#scheduled-bypass-permissions').checked ? 'Explicit permission bypass overrides the selected mode.' : modes.find(mode => mode.id === select.value)?.description || '';
   }
   $('#scheduled-permissions').addEventListener('change', () => permissionControls());
   $('#scheduled-bypass-permissions').addEventListener('change', () => permissionControls());
@@ -113,7 +117,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   function updateControls() {
     permissionControls();
     $('#scheduled-bypass-label').textContent = `Dangerously bypass permissions for ${getHarness(harnessNode.value)?.label || harnessNode.value}`;
-    $('#scheduled-bypass-description').textContent = harnessNode.value === 'codex' ? 'Skip tool approvals and the Codex sandbox.' : 'Skip Claude Code tool permission checks.';
+    $('#scheduled-bypass-description').textContent = getHarness(harnessNode.value)?.bypassDescription || '';
     const later = form.elements['scheduled-start'].value === 'later';
     const repeating = form.elements['scheduled-repeat'].value === 'interval';
     $('#scheduled-time-wrap').hidden = !later;
@@ -148,7 +152,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
       if (harnessNode.value === harness) void updateModels();
     } catch { modelCache.set(harness, []); }
   }
-  harnessNode.addEventListener('change', () => { $('#scheduled-bypass-permissions').checked = false; updateControls(); modelNode.value = ''; updateCustomModel(); void updateModels(); });
+  harnessNode.addEventListener('change', () => { harnessTouched = true; $('#scheduled-bypass-permissions').checked = false; updateControls(); modelNode.value = ''; updateCustomModel(); void updateModels(); });
   modelNode.addEventListener('change', () => {
     updateCustomModel();
     if (!customModelNode.hidden) customModelNode.focus();
@@ -164,7 +168,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   function resetForm() {
     editing = null; editLocked = false;
     form.querySelectorAll('input, select, textarea').forEach(node => { node.disabled = false; });
-    form.reset(); harnessNode.value = 'codex';
+    form.reset(); harnessTouched = false; harnessNode.value = preferredHarness(detected());
     customModelNode.hidden = true;
     $('#scheduled-custom-model-label').hidden = true;
     customModelNode.required = false;
@@ -269,7 +273,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     const extra=element('dl','session-stats-grid');technical.append(extra);
     for (const [key, value] of [
       ['Agent / model', agentLabel(task, run)], ['Status', task.status === 'scheduled' && task.pendingResumeId ? 'Retry scheduled' : STATUS[run ? runStatus(run) : task.status] || task.status],
-      ['Permissions', (run ? run.dangerouslyBypassPermissions : task.dangerouslyBypassPermissions) ? 'Permission bypass enabled' : PERMISSIONS[(run ? run.permissions : task.permissions) || 'provider-default']?.[0] || 'Unknown'], ['Schedule', formatScheduledInterval(task.intervalSeconds)], ['Project', run?.projectPath || task.projectPath || 'Not reported'],
+      ['Permissions', (run ? run.dangerouslyBypassPermissions : task.dangerouslyBypassPermissions) ? 'Permission bypass enabled' : permissionLabel(run?.harness || task.harness, (run ? run.permissions : task.permissions) || 'provider-default')], ['Schedule', formatScheduledInterval(task.intervalSeconds)], ['Project', run?.projectPath || task.projectPath || 'Not reported'],
       ['Job ID', task.id], ['Run ID', run?.runId || 'No runs yet'],
       ['Started', run ? formatScheduledTime(run.startedAt) : 'Not started'],
       ['Finished', run?.finishedAt ? formatScheduledTime(run.finishedAt) : '—'],
@@ -448,7 +452,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     refreshing = (async () => {
       try {
         const found = await list();
-        tasks = Array.isArray(found) ? found : [];
+        // The built-in daily digest is managed in its own tab.
+        tasks = Array.isArray(found) ? found.filter(task => task.kind !== 'digest') : [];
         tasks.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         const resumes = getResumeJobs ? await getResumeJobs() : [];
         if (getRuns) await Promise.all(tasks.map(async task => {
@@ -522,5 +527,18 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     finally { busy = false; $('#scheduled-edit-cancel').disabled = false; submit.disabled = editLocked || !native; }
   });
   $('#scheduled-refresh').addEventListener('click', () => void refresh());
-  return { refresh, onShow: refresh };
+  function onRuntime() {
+    renderHarnessOptions();
+    if (!harnessNode.value || editing) updateControls();
+    if (editing || harnessTouched) return;
+    const preferred = preferredHarness(detected(), harnessNode.value);
+    if (preferred === harnessNode.value) return;
+    harnessNode.value = preferred;
+    modelNode.value = '';
+    updateControls();
+    updateCustomModel();
+    void updateModels();
+  }
+
+  return { refresh, onShow: refresh, onRuntime };
 }

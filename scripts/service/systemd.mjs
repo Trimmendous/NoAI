@@ -1,10 +1,9 @@
+// Linux systemd user service for `noai service`.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
-const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const serviceName = 'noai.service';
 
 function unitQuote(value, exec = false) {
@@ -17,14 +16,6 @@ function unitQuote(value, exec = false) {
 export function serviceFile(env = process.env, home = os.homedir()) {
   const config = env.XDG_CONFIG_HOME || path.join(home, '.config');
   return path.join(config, 'systemd', 'user', serviceName);
-}
-
-export function defaultBinary() {
-  for (const mode of ['debug', 'release']) {
-    const candidate = path.join(repoRoot, 'src-tauri', 'target', mode, 'noai');
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  throw new Error('No Noai binary found. Build it with cargo, or pass service install --binary /absolute/path/to/noai');
 }
 
 export function serviceUnit(binary, environmentPath) {
@@ -49,11 +40,9 @@ function systemctlState(command) {
   return state;
 }
 
-export function manageService(command, binaryOption, env = process.env, home = os.homedir()) {
-  if (process.platform !== 'linux') throw new Error('Noai user services are supported on Linux only');
+export function manageSystemdService(command, binary, env = process.env, home = os.homedir()) {
   const file = serviceFile(env, home);
   if (command === 'install') {
-    const binary = path.resolve(binaryOption || defaultBinary());
     fs.accessSync(binary, fs.constants.X_OK);
     const environmentPath = env.PATH || '/usr/local/bin:/usr/bin:/bin';
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });

@@ -27,15 +27,9 @@ fn create_workspace(home: &Path) -> Result<std::path::PathBuf, String> {
     let root = home.join(".noai");
     fs::create_dir_all(&root).map_err(|error| format!("Cannot create ~/.noai: {error}"))?;
     let path = root.join(uuid::Uuid::new_v4().to_string());
-    let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder
-        .create(&path)
-        .map_err(|error| format!("Cannot create workspace: {error}"))?;
+    fs::create_dir(&path).map_err(|error| format!("Cannot create workspace: {error}"))?;
+    crate::platform::restrict_dir(&path)
+        .map_err(|error| format!("Cannot protect workspace: {error}"))?;
     Ok(path)
 }
 

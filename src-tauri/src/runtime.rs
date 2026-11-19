@@ -101,6 +101,21 @@ pub fn edit_scheduled_task(
 }
 
 #[tauri::command]
+pub fn get_digest(app: AppHandle) -> Result<Value, String> {
+    ipc::request(&app, json!({"command":"get_digest"}))
+}
+
+#[tauri::command]
+pub fn set_digest(app: AppHandle, input: crate::scheduled_tasks::DigestInput) -> Result<Task, String> {
+    ipc::request(&app, json!({"command":"set_digest", "input":input}))
+}
+
+#[tauri::command]
+pub fn run_digest_now(app: AppHandle) -> Result<Task, String> {
+    ipc::request(&app, json!({"command":"run_digest_now"}))
+}
+
+#[tauri::command]
 pub fn retry_scheduled_task(
     app: AppHandle,
     id: String,

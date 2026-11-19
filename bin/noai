@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { manageService, defaultBinary } from '../scripts/systemd.mjs';
+import { manageService, defaultBinary } from '../scripts/service/index.mjs';
 
 const HELP = `Noai CLI — schedule local coding-agent tasks
 
@@ -24,7 +24,7 @@ Usage:
   noai service install [--binary /absolute/path/to/noai]
   noai service start|stop|status|uninstall
 
-Jobs require Noai running in the desktop app or Linux user service. Job output is JSON for scripting.
+Jobs require Noai running in the desktop app or user service (systemd on Linux, launchd on macOS). Job output is JSON for scripting.
 The app runs tasks locally through your installed Codex or Claude CLI.
 New Codex jobs default to sandboxed project writes and network access.
 New Claude jobs default to automatic permission review (requires provider support).
@@ -168,8 +168,10 @@ export function formatPreview(input) {
   ].join('\n');
 }
 
-export function defaultSocketPath(env = process.env, home = os.homedir()) {
-  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'dev.noai.desktop', 'control.sock');
+// Must match crate::daemon::app_data_dir in src-tauri/src/daemon.rs.
+export function defaultSocketPath(env = process.env, home = os.homedir(), platform = process.platform) {
+  if (env.NOAI_DATA_DIR) return path.join(env.NOAI_DATA_DIR, 'control.sock');
+  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'dev.noai.desktop', 'control.sock');
   const data = env.XDG_DATA_HOME || path.join(home, '.local', 'share');
   return path.join(data, 'dev.noai.desktop', 'control.sock');
 }
@@ -196,7 +198,7 @@ export function sendRequest(socketPath, request) {
       }
     });
     socket.on('error', error => done(error.code === 'ENOENT' || error.code === 'ECONNREFUSED'
-      ? new Error(`Cannot connect to Noai at ${socketPath}. Start the desktop app or Linux user service.`)
+      ? new Error(`Cannot connect to Noai at ${socketPath}. Start the desktop app or run noai service start.`)
       : error));
     socket.on('end', () => { if (!settled) done(new Error('Noai closed the connection without a response')); });
   });
@@ -222,9 +224,9 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
         const socket = defaultSocketPath();
         let ping;
         try { ping = await sendRequest(socket, {command:'ping'}); } catch { /* No daemon to hand off. */ }
-        if (ping?.ok && ping.data?.daemon && !ping.data.managedBySystemd) {
+        if (ping?.ok && ping.data?.daemon && !(ping.data.managedByService ?? ping.data.managedBySystemd)) {
           const active = await sendRequest(socket, {command:'active_runs'});
-          if (!active.ok || active.data.length) fail('The standalone daemon has active work. Stop its runs before transferring to systemd.');
+          if (!active.ok || active.data.length) fail('The standalone daemon has active work. Stop its runs before transferring to the user service.');
           const stopped = await sendRequest(socket, {command:'shutdown'});
           if (!stopped.ok) {
             // One-time migration for earlier Noai daemons without a shutdown command.

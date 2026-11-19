@@ -9,7 +9,7 @@
 .conversation-title { overflow: hidden; display: block; max-width: 100%; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-meta { display: block; overflow: hidden; max-width: 100%; color: var(--ink-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .welcome-mark { display: grid; place-items: center; width: 49px; height: 49px; margin-bottom: 27px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: 0 4px 18px var(--shadow); }
-.welcome-mark .brand-mark { transform: rotate(-15deg) scale(1.2); }
+.welcome-mark .wordmark-glyph { width: auto; height: 22px; overflow: visible; }
 .welcome-kicker, .page-kicker { margin: 0; color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 .chat-welcome h2 { margin: 8px 0 9px; font-size: clamp(25px, 3.3vw, 36px); font-weight: 610; letter-spacing: -.055em; line-height: 1.15; }
 .welcome-description { max-width: 390px; margin: 0; color: var(--ink-soft); font-size: 13px; line-height: 1.65; }

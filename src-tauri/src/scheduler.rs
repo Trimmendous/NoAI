@@ -1,7 +1,5 @@
 use crate::adapters::{RunEvent, RunRequest};
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
@@ -126,8 +124,7 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn open_in_dir(dir: &Path) -> Result<Self, String> {
         fs::create_dir_all(dir).map_err(|error| format!("Cannot create app data: {error}"))?;
-        #[cfg(unix)]
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+        crate::platform::restrict_dir(dir)
             .map_err(|error| format!("Cannot protect app data: {error}"))?;
         let lock_file = OpenOptions::new()
             .read(true)
@@ -453,17 +450,12 @@ fn save_journal(path: &Path, journal: &Journal) -> Result<(), String> {
     let result = (|| -> std::io::Result<()> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)]
-        options.mode(0o600);
+        crate::platform::restrict_new_file(&mut options);
         let mut file = options.open(&temp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         fs::rename(&temp, path)?;
-        #[cfg(unix)]
-        if let Some(parent) = path.parent() {
-            File::open(parent)?.sync_all()?;
-        }
-        Ok(())
+        crate::platform::sync_parent_dir(path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);

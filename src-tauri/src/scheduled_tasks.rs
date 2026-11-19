@@ -1,7 +1,7 @@
 use crate::adapters::{RunEvent, RunRequest};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     sync::{
@@ -72,6 +72,44 @@ pub struct Task {
     pub created_at: u64,
     #[serde(default)]
     pub pending_resume_id: Option<String>,
+    /// `Some("digest")` for the built-in daily digest; `None` for user jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Digest only: the configured daily time. Later occurrences are this plus
+    /// whole days, so "Run now" never shifts the schedule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DigestInput {
+    pub enabled: bool,
+    pub harness: String,
+    pub model: Option<String>,
+    /// Next local occurrence of the chosen time of day, computed by the client.
+    pub start_at: u64,
+    #[serde(default = "default_true")]
+    pub auto_resume: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub const DIGEST_KIND: &str = "digest";
+const DAY: u64 = 86_400;
+
+fn is_digest(task: &Task) -> bool {
+    task.kind.as_deref() == Some(DIGEST_KIND)
+}
+
+/// First `anchor + k days` strictly after `at`.
+fn next_daily(anchor: u64, at: u64) -> u64 {
+    if anchor > at {
+        return anchor;
+    }
+    anchor + ((at - anchor) / DAY + 1) * DAY
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -228,7 +266,7 @@ impl ScheduledTasks {
         if prompt.is_empty() {
             return Err("Prompt is required".into());
         }
-        if !matches!(input.harness.as_str(), "codex" | "claude") {
+        if crate::harness::get(&input.harness).is_none() {
             return Err("Unsupported harness".into());
         }
         if input.interval_seconds.is_some_and(|seconds| seconds < 60) {
@@ -262,6 +300,8 @@ impl ScheduledTasks {
             permissions: input.permissions,
             created_at: now(),
             pending_resume_id: None,
+            kind: None,
+            anchor_at: None,
         };
         Ok(task)
     }
@@ -303,6 +343,9 @@ impl ScheduledTasks {
                     run.model = previous.model.clone();
                 }
                 run.harness.get_or_insert(previous.harness.clone());
+            }
+            if is_digest(&previous) {
+                return Err("Change the daily digest from the Digest tab.".into());
             }
             let updated = Task {
                 id: previous.id,
@@ -388,6 +431,122 @@ impl ScheduledTasks {
             }
             task.auto_resume = enabled;
             Ok(task.clone())
+        })
+    }
+
+    pub fn digest(&self) -> Option<Task> {
+        self.journal.lock().unwrap().tasks.iter().find(|task| is_digest(task)).cloned()
+    }
+
+    /// Most recent digest runs, newest first.
+    pub fn digest_runs(&self, limit: usize) -> Vec<TaskRun> {
+        let journal = self.journal.lock().unwrap();
+        let Some(id) = journal.tasks.iter().find(|task| is_digest(task)).map(|task| &task.id) else {
+            return Vec::new();
+        };
+        journal
+            .runs
+            .iter()
+            .rev()
+            .filter(|run| &run.task_id == id)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    /// User jobs and their runs that started or finished at or after `since`.
+    /// The digest's own runs are excluded so it never reports on itself.
+    pub fn activity_since(&self, since: u64) -> (Vec<Task>, Vec<TaskRun>) {
+        let journal = self.journal.lock().unwrap();
+        let tasks: Vec<Task> = journal.tasks.iter().filter(|task| !is_digest(task)).cloned().collect();
+        let runs = journal
+            .runs
+            .iter()
+            .filter(|run| tasks.iter().any(|task| task.id == run.task_id))
+            .filter(|run| run.started_at >= since || run.finished_at.is_some_and(|at| at >= since))
+            .cloned()
+            .collect();
+        (tasks, runs)
+    }
+
+    pub fn set_digest(&self, input: DigestInput, project_path: String) -> Result<Task, String> {
+        if crate::harness::get(&input.harness).is_none() {
+            return Err("Unsupported harness".into());
+        }
+        if input.enabled && input.start_at == 0 {
+            return Err("Choose a time for the digest".into());
+        }
+        // Read-only: the digest only summarizes data embedded in its prompt.
+        let permissions = crate::harness::require(&input.harness)?.read_only();
+        let model = input.model.filter(|value| !value.trim().is_empty());
+        self.update(|journal| {
+            let existing = journal.tasks.iter_mut().find(|task| is_digest(task));
+            let Some(task) = existing else {
+                if !input.enabled {
+                    return Err("The daily digest is not set up".into());
+                }
+                let task = Task {
+                    id: unique_id("digest"),
+                    title: "Daily digest".into(),
+                    prompt: "Summarize the last 24 hours of Noai jobs and agent usage.".into(),
+                    harness: input.harness,
+                    model,
+                    project_path,
+                    next_run_at: Some(input.start_at),
+                    interval_seconds: Some(DAY),
+                    status: "scheduled".into(),
+                    last_run_id: None,
+                    last_result: None,
+                    auto_resume: input.auto_resume,
+                    dangerously_bypass_permissions: false,
+                    permissions: Some(permissions),
+                    created_at: now(),
+                    pending_resume_id: None,
+                    kind: Some(DIGEST_KIND.into()),
+                    anchor_at: Some(input.start_at),
+                };
+                journal.tasks.push(task.clone());
+                return Ok(task);
+            };
+            task.harness = input.harness;
+            task.model = model;
+            task.permissions = Some(permissions);
+            task.auto_resume = input.auto_resume;
+            task.project_path = project_path;
+            if input.enabled {
+                task.anchor_at = Some(input.start_at);
+                task.interval_seconds = Some(DAY);
+                // A digest being written now keeps running; it reschedules on finish.
+                if task.status != "running" {
+                    task.status = "scheduled".into();
+                    task.next_run_at = Some(input.start_at);
+                }
+            } else {
+                task.status = "disabled".into();
+                task.next_run_at = None;
+                task.pending_resume_id = None;
+            }
+            Ok(task.clone())
+        })
+    }
+
+    /// Queue an immediate digest without moving the daily schedule.
+    pub fn run_digest_now(&self) -> Result<Task, String> {
+        self.update(|journal| {
+            let task = journal
+                .tasks
+                .iter_mut()
+                .find(|task| is_digest(task))
+                .ok_or("Turn on the daily digest first")?;
+            match task.status.as_str() {
+                "running" => Err("A digest is already being written".into()),
+                "disabled" => Err("Turn on the daily digest first".into()),
+                _ => {
+                    task.status = "scheduled".into();
+                    task.next_run_at = Some(now());
+                    Ok(task.clone())
+                }
+            }
         })
     }
 
@@ -518,6 +677,15 @@ impl ScheduledTasks {
                 return Ok(None);
             }
             task.last_result = Some(result);
+            if is_digest(task) {
+                // A digest failure must not stop tomorrow's digest.
+                if task.status != "disabled" {
+                    let anchor = task.anchor_at.unwrap_or(scheduled_at);
+                    task.next_run_at = Some(next_daily(anchor, at));
+                    task.status = "scheduled".into();
+                }
+                return Ok(Some(task.clone()));
+            }
             if let Some(interval) = task.interval_seconds.filter(|_| status == "completed") {
                 // Skip missed occurrences; never launch a catch-up burst.
                 let elapsed = at.saturating_sub(scheduled_at);
@@ -541,20 +709,12 @@ fn save(path: &Path, journal: &Journal) -> Result<(), String> {
     let result = (|| -> std::io::Result<()> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
+        crate::platform::restrict_new_file(&mut options);
         let mut file = options.open(&temp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         fs::rename(&temp, path)?;
-        #[cfg(unix)]
-        if let Some(dir) = path.parent() {
-            File::open(dir)?.sync_all()?;
-        }
-        Ok(())
+        crate::platform::sync_parent_dir(path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temp);
@@ -565,6 +725,46 @@ fn save(path: &Path, journal: &Journal) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn digest_keeps_its_daily_time_survives_failure_and_stays_off() {
+        let dir = std::env::temp_dir().join(unique_id("noai-digest-test"));
+        let store = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let anchor = now() + 3_600;
+        let input = |enabled| DigestInput {
+            enabled,
+            harness: "claude".into(),
+            model: Some("sonnet".into()),
+            start_at: anchor,
+            auto_resume: true,
+        };
+        let task = store.set_digest(input(true), "/tmp".into()).unwrap();
+        assert_eq!(task.next_run_at, Some(anchor));
+        assert_eq!(task.permissions, Some(crate::adapters::JobPermissions::ProviderDefault));
+        assert!(store.list().iter().filter(|task| is_digest(task)).count() == 1);
+
+        // Run now, then fail: the next run is still the configured daily time.
+        store.run_digest_now().unwrap();
+        let (claimed, request) = store.claim_due(now() + 1).unwrap().remove(0);
+        assert!(is_digest(&claimed));
+        assert!(store.run_digest_now().is_err(), "no second digest while one runs");
+        let after = store.finish(&request.run_id, "failed", "boom".into(), now() + 5).unwrap().unwrap();
+        assert_eq!(after.status, "scheduled");
+        assert_eq!(after.next_run_at, Some(anchor));
+
+        // After the anchored run, it moves exactly one day later.
+        let request = store.claim_due(anchor).unwrap().remove(0).1;
+        let after = store.finish(&request.run_id, "completed", "ok".into(), anchor + 60).unwrap().unwrap();
+        assert_eq!(after.next_run_at, Some(anchor + DAY));
+        assert_eq!(store.digest_runs(10).len(), 2);
+
+        let off = store.set_digest(input(false), "/tmp".into()).unwrap();
+        assert_eq!((off.status.as_str(), off.next_run_at), ("disabled", None));
+        assert!(store.claim_due(anchor + 2 * DAY).unwrap().is_empty());
+        assert!(store.run_digest_now().is_err());
+        assert!(store.activity_since(0).0.is_empty(), "digest never reports on itself");
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn manual_retry_preserves_history_continues_session_and_honors_reset() {

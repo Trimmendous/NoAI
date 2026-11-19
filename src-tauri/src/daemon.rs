@@ -1,23 +1,10 @@
 //! Headless runtime entry point. This path never initializes Tauri or GTK.
-use crate::{control, engine};
-use std::{path::PathBuf, sync::Arc};
-
-pub fn app_data_dir() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is unavailable")?;
-    let data_home = std::env::var_os("XDG_DATA_HOME")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".local/share"));
-    Ok(data_home.join("dev.noai.desktop"))
-}
+use crate::{control, engine, platform};
+use std::sync::Arc;
 
 pub fn run() -> Result<(), String> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or("HOME is unavailable")?;
-    let dir = app_data_dir()?;
+    let home = platform::home_dir()?;
+    let dir = platform::app_data_dir()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -47,3 +34,4 @@ pub fn run() -> Result<(), String> {
         Ok(())
     })
 }
+

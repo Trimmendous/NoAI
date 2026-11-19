@@ -2,7 +2,7 @@ import { initSessions } from './components/sessions.js';
 import { listLocalSessions, getLocalSession, editScheduledTask, retryScheduledTask } from './services/bridge.js';
 import { initActivityMetrics } from './components/activity-metrics.js';
 import { createStore, createInitialWorkspace, createConversation, createMessage } from './core/state.js';
-import { HARNESSES, getHarness } from './core/catalog.js';
+import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel, setHarnesses } from './core/catalog.js';
 import { initTheme } from './core/theme.js';
 import { isNative, runtimeStatus, chooseProject, startRun, cancelRun, listenRunEvents, providerUsage, resumeJobs, cancelResumeJob, setBackgroundMode, harnessModels, ensureProject, listScheduledTasks, createScheduledTask, cancelScheduledTask, getScheduledTaskRuns, listenScheduledTasks, connectEvents, activeRuns, activityMetrics } from './services/bridge.js';
 import { loadInitialWorkspace, createWorkspacePersistence } from './services/workspace.js';
@@ -12,6 +12,8 @@ import { createMessageRenderer } from './components/messages.js';
 import { renderAccounts, renderActivity, renderDetails } from './components/panels.js';
 import { renderJobs, countdown } from './components/jobs.js';
 import { initScheduledTasks } from './components/scheduled-tasks.js';
+import { initDigest } from './components/digest.js';
+import { getDigest, setDigest, runDigestNow } from './services/bridge.js';
 import { recoverJobMessage } from './core/recovery.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -24,7 +26,7 @@ let view = 'home';
 const viewScroll = new Map();
 let search = '';
 let draft = '';
-let defaultHarness = 'codex';
+let defaultHarness = '';
 let defaultModel = '';
 let defaultBypassPermissions = false;
 let renderedConversation;
@@ -55,6 +57,13 @@ const scheduledTasks = initScheduledTasks({
   getRuns: getScheduledTaskRuns, getResumeJobs: resumeJobs, fetchMetrics: activityMetrics, getModels: harnessModels, ensureProject, native, toast,
   getProjectPath: () => store.getState().projectPath,
   getAutoResume: () => store.getState().preferences.autoResume,
+  getCustomModels: () => store.getState().preferences.customModels || {},
+  getRuntime: () => runtime,
+});
+
+const digestPanel = initDigest({
+  get: getDigest, set: setDigest, runNow: runDigestNow, getModels: harnessModels, native, toast,
+  getRuntime: () => runtime,
   getCustomModels: () => store.getState().preferences.customModels || {},
 });
 
@@ -103,6 +112,7 @@ function setView(next) {
   if (next === 'home') void metricsPanel.refresh();
   if (next === 'sessions') void sessionsPanel.refresh();
   if (next === 'jobs') void scheduledTasks.onShow();
+  if (next === 'digest') void digestPanel.refresh();
 }
 function selectConversation(id) {
   store.setState(state => ({ ...state, activeConversationId: id }));
@@ -140,7 +150,7 @@ function updateComposer() {
   $('#chat-bypass-permissions').disabled = !!run || preparingRun;
   $('#chat-bypass-permissions').checked = conversation?.dangerouslyBypassPermissions ?? defaultBypassPermissions;
   $('#chat-bypass-label').textContent = `Dangerously bypass permissions for ${getHarness(harness)?.label || harness}`;
-  $('#chat-bypass-description').textContent = harness === 'codex' ? 'Skip tool approvals and the Codex sandbox.' : 'Skip Claude Code tool permission checks.';
+  $('#chat-bypass-description').textContent = getHarness(harness)?.bypassDescription || '';
   $('#composer-status').textContent = run?.waiting ? `Waiting for quota · ${countdown(run.retryAt)} · Cancel to send a different instruction.`
     : run ? 'Working in your project · You can stop at any time.'
     : !persistenceAvailable ? 'Saved data is unavailable. Restart after resolving the storage error.'
@@ -176,14 +186,14 @@ async function loadModels(harness) {
 function render() {
   const state = store.getState();
   const conversation = active();
-  for (const name of ['home', 'chat', 'accounts', 'activity', 'jobs', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
+  for (const name of ['home', 'chat', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
   document.querySelectorAll('.nav-item[data-view]').forEach(button => {
     const selected = button.dataset.view === view || view === 'session' && button.dataset.view === 'sessions' || ['job', 'job-conversation'].includes(view) && button.dataset.view === 'jobs';
     button.classList.toggle('is-active', selected);
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#main-title').textContent = view === 'home' ? 'Home' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts & usage' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
+  $('#main-title').textContent = view === 'home' ? 'Home' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts & usage' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
   const project = conversation?.projectPath || state.projectPath;
   $('#project-label').textContent = state.projectPath ? basename(state.projectPath) : 'Automatic workspace';
   $('#project-label').title = state.projectPath || 'Create a UUID folder in ~/.noai when a chat starts';
@@ -224,21 +234,33 @@ store.subscribe(state => {
   if (persistenceAvailable) persistence.schedule(state);
 });
 
-$('#harness-select').replaceChildren(...HARNESSES.map(harness => {
-  const option = new Option(harness.available ? harness.label : `${harness.label} · coming soon`, harness.id);
-  option.disabled = !harness.available;
-  return option;
-}));
+function renderHarnessOptions() {
+  const selected = $('#harness-select').value;
+  $('#harness-select').replaceChildren(...HARNESSES.map(harness => {
+    const option = new Option(harnessOptionLabel(harness, runtime.harnesses), harness.id);
+    option.disabled = !harness.available;
+    return option;
+  }));
+  if (selected) $('#harness-select').value = selected;
+}
+renderHarnessOptions();
 
 async function refreshRuntime() {
   $('#refresh-accounts').disabled = true;
   try {
     runtime = await runtimeStatus();
+    setHarnesses(runtime.harnesses);
     const installed = runtime.harnesses.filter(item => item.installed && getHarness(item.id)?.available);
     $('#runtime-label').textContent = native ? `${installed.length} local agent${installed.length === 1 ? '' : 's'} available` : 'Desktop preview';
     $('.runtime-row').classList.toggle('is-ready', native && installed.length > 0);
     $('.runtime-row').classList.remove('is-error');
-    if (!active() && !runtime.harnesses.find(item => item.id === defaultHarness)?.installed && installed.length) defaultHarness = installed[0].id;
+    if (!active()) {
+      const preferred = preferredHarness(runtime.harnesses, defaultHarness);
+      if (preferred !== defaultHarness) { defaultHarness = preferred; defaultModel = ''; }
+    }
+    renderHarnessOptions();
+    scheduledTasks.onRuntime();
+    digestPanel.onRuntime();
   } catch (error) {
     $('#runtime-label').textContent = 'Runtime unavailable';
     $('.runtime-row').classList.add('is-error');
@@ -541,7 +563,7 @@ await refreshRuntime();
 try { await setBackgroundMode(store.getState().preferences.backgroundMode); }
 catch (error) { toast(`Background mode is unavailable: ${String(error)}`, 'error'); }
 await refreshJobs();
-try { await listenScheduledTasks(() => { if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); }); }
+try { await listenScheduledTasks(() => { if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
 catch (error) { toast(`Job updates are unavailable: ${String(error)}`, 'error'); }
 try {
   for (const item of await activeRuns()) {

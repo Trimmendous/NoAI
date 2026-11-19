@@ -3,7 +3,7 @@ export const WORKSPACE_VERSION = 1;
 const THEMES = new Set(['system', 'light', 'dark']);
 const PALETTES = new Set(['graphite', 'sage', 'blue', 'amber']);
 const ROLES = new Set(['user', 'assistant', 'system']);
-const HARNESSES = new Set(['codex', 'claude']);
+import { HARNESS_ID } from './catalog.js';
 const SAVED_STATUSES = new Set(['complete', 'error', 'interrupted']);
 const TRANSIENT_STATUSES = new Set(['queued', 'running', 'streaming']);
 
@@ -35,7 +35,7 @@ function customModels(value) {
   const clean = (models) => Array.isArray(models)
     ? [...new Set(models.filter((model) => typeof model === 'string').map((model) => model.trim()).filter(Boolean))]
     : [];
-  return { codex: clean(input.codex), claude: clean(input.claude) };
+  return Object.fromEntries(Object.entries(input).filter(([harness]) => HARNESS_ID.test(harness)).map(([harness, models]) => [harness, clean(models)]));
 }
 
 export function createInitialWorkspace() {
@@ -44,7 +44,7 @@ export function createInitialWorkspace() {
     conversations: [],
     activeConversationId: null,
     projectPath: null,
-    preferences: { theme: 'system', palette: 'graphite', customModels: { codex: [], claude: [] }, autoResume: true, backgroundMode: true, manualPlans: {} },
+    preferences: { theme: 'system', palette: 'graphite', customModels: {}, autoResume: true, backgroundMode: true, manualPlans: {} },
   };
 }
 
@@ -78,7 +78,7 @@ export function normalizeConversation(raw, now = new Date().toISOString()) {
   return {
     id: nullableText(input.id) ?? newId(),
     title: nullableText(input.title) ?? 'New conversation',
-    harness: HARNESSES.has(input.harness) ? input.harness : 'codex',
+    harness: typeof input.harness === 'string' && HARNESS_ID.test(input.harness) ? input.harness : '',
     model: text(input.model).trim(),
     projectPath: nullableText(input.projectPath),
     resumeId: nullableText(input.resumeId),

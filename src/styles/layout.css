@@ -3,13 +3,17 @@
 .sidebar-top { flex: none; }
 .brand-row { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 7px; }
 .brand { display: inline-flex; align-items: center; gap: 9px; width: fit-content; }
-.brand-name { font-size: 20px; font-weight: 700; letter-spacing: -.08em; line-height: 1; }
-.brand-period { color: var(--accent); }
-.brand-mark { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: 23px; height: 23px; transform: rotate(-15deg); }
-.brand-mark span { display: block; width: 4px; border-radius: 4px; background: var(--accent); }
-.brand-mark span:nth-child(1) { height: 9px; transform: translateY(4px); }
-.brand-mark span:nth-child(2) { height: 19px; }
-.brand-mark span:nth-child(3) { height: 12px; transform: translateY(-3px); }
+/* Wordmark: the final I is the first leg of an H whose second leg is a blinking cursor. */
+@font-face { font-family: 'Noai Mono'; font-style: normal; font-weight: 700; font-display: block; src: url('../fonts/JetBrainsMono-Bold.woff2') format('woff2'); }
+.wordmark { display: inline-flex; align-items: baseline; color: var(--ink); font-family: 'Noai Mono', ui-monospace, SFMono-Regular, monospace; font-size: 21px; font-weight: 700; letter-spacing: -.03em; line-height: 1; white-space: nowrap; }
+.wordmark-prompt { margin-right: .12em; color: var(--ink-muted); }
+/* The glyph's 0-100 box is exactly the font's cap height (0.73em), so its bottom edge sits on the text baseline. */
+.wordmark .wordmark-glyph { width: auto; height: .73em; margin-left: .03em; overflow: visible; }
+.wordmark-glyph { stroke: none; }
+.wordmark-stem { fill: var(--ink); }
+.wordmark-cursor { fill: var(--accent); animation: wordmark-blink 1.1s steps(1) infinite; }
+@keyframes wordmark-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .wordmark-cursor { animation: none; } }
 .project-picker { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 55px; margin-top: 23px; padding: 8px 9px; text-align: left; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .project-picker:hover { border-color: var(--line-strong); background: var(--surface-hover); }
 .project-symbol { display: grid; place-items: center; width: 31px; height: 31px; border: 1px solid var(--line); border-radius: 7px; color: var(--accent); background: var(--surface-subtle); }

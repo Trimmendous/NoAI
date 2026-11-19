@@ -12,17 +12,17 @@ use std::{
 };
 
 #[derive(Default, Serialize, Deserialize)]
-struct FileState {
+pub struct FileState {
     #[serde(default)]
     parse_errors: usize,
     offset: u64,
     len: u64,
     modified: u128,
     identity: u64,
-    session: String,
-    model: String,
-    totals: [u64; 3],
-    rows: BTreeMap<String, Value>,
+    pub(crate) session: String,
+    pub(crate) model: String,
+    pub(crate) totals: [u64; 3],
+    pub(crate) rows: BTreeMap<String, Value>,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Cache {
@@ -54,21 +54,20 @@ pub fn start(dir: PathBuf, home: PathBuf) {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        let codex = std::env::var_os("CODEX_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".codex"));
-        let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".claude"));
+        let roots: Vec<_> = crate::harness::all()
+            .iter()
+            .flat_map(|agent| {
+                agent
+                    .history_roots(&home)
+                    .into_iter()
+                    .map(move |root| (root.path, agent.id()))
+            })
+            .collect();
         loop {
             let mut errors = 0;
             let mut paths = Vec::new();
-            for (root, harness) in [
-                (codex.join("sessions"), "codex"),
-                (codex.join("archived_sessions"), "codex"),
-                (claude.join("projects"), "claude"),
-            ] {
-                discover(&root, harness, &mut paths, &mut errors);
+            for (root, harness) in &roots {
+                discover(root, harness, &mut paths, &mut errors);
             }
             let mut changed = false;
             for (file, harness) in &paths {
@@ -117,11 +116,7 @@ fn save(path: &Path, cache: &Cache) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
+    crate::platform::restrict_new_file(&mut options);
     let mut file = options.open(&tmp)?;
     serde_json::to_writer(&mut file, cache)?;
     file.flush()?;
@@ -166,13 +161,7 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    #[cfg(unix)]
-    let identity = {
-        use std::os::unix::fs::MetadataExt;
-        meta.ino()
-    };
-    #[cfg(not(unix))]
-    let identity = 0;
+    let identity = crate::platform::file_identity(&meta);
     if meta.len() == state.len && modified == state.modified && identity == state.identity {
         return Ok(false);
     }
@@ -213,115 +202,20 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
     state.identity = identity;
     Ok(true)
 }
-fn timestamp(v: &Value) -> Option<i64> {
+pub(crate) fn timestamp(v: &Value) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(v["timestamp"].as_str()?)
         .ok()
         .map(|d| d.timestamp())
 }
-fn count(v: &Value, key: &str) -> u64 {
+pub(crate) fn count(v: &Value, key: &str) -> u64 {
     v[key].as_u64().unwrap_or(0)
 }
-fn row(id: &str, harness: &str, session: &str, model: &str, at: i64, kind: &str) -> Value {
+pub(crate) fn row(id: &str, harness: &str, session: &str, model: &str, at: i64, kind: &str) -> Value {
     json!({"id":id,"at":at,"runId":format!("local:{harness}:{session}"),"sessionId":session,"harness":harness,"model":model,"type":kind,"source":"local"})
 }
 fn parse(harness: &str, v: &Value, s: &mut FileState) {
-    let p = &v["payload"];
-    if harness == "codex" {
-        match v["type"].as_str().unwrap_or("") {
-            "session_meta" => {
-                if let Some(id) = p["id"].as_str() {
-                    s.session = id.into();
-                }
-                return;
-            }
-            "turn_context" => {
-                if let Some(model) = p["model"].as_str() {
-                    s.model = model.into();
-                }
-                return;
-            }
-            _ => {}
-        }
-        let Some(at) = timestamp(v) else { return };
-        if p["type"] == "token_count" {
-            let totals = &p["info"]["total_token_usage"];
-            if !totals.is_object() {
-                return;
-            }
-            let current = [
-                count(totals, "input_tokens"),
-                count(totals, "output_tokens"),
-                count(totals, "cached_input_tokens"),
-            ];
-            let delta = std::array::from_fn::<_, 3, _>(|i| {
-                if current[i] >= s.totals[i] {
-                    current[i] - s.totals[i]
-                } else {
-                    current[i]
-                }
-            });
-            s.totals = current;
-            if delta[0] == 0 && delta[1] == 0 {
-                return;
-            }
-            let id = format!(
-                "local:codex:{}:{}:{}:{}",
-                s.session, v["timestamp"], current[0], current[1]
-            );
-            let mut r = row(&id, harness, &s.session, &s.model, at, "usage");
-            r["usage"] = json!({"kind":"tokens","scope":"turn","inputTokens":delta[0],"outputTokens":delta[1],"cacheReadTokens":delta[2]});
-            s.rows.insert(id, r);
-        } else if v["type"] == "response_item"
-            && matches!(
-                p["type"].as_str(),
-                Some("function_call" | "custom_tool_call")
-            )
-        {
-            if let Some(call) = p["call_id"].as_str() {
-                let id = format!("local:codex:{}:tool:{call}", s.session);
-                let mut r = row(&id, harness, &s.session, &s.model, at, "activity");
-                r["tool"] = p["name"].clone();
-                s.rows.insert(id, r);
-            }
-        }
-    } else if v["type"] == "assistant" {
-        let m = &v["message"];
-        let Some(message) = m["id"].as_str() else {
-            return;
-        };
-        let Some(at) = timestamp(v) else { return };
-        let session = v["sessionId"].as_str().unwrap_or("");
-        let model = m["model"].as_str().unwrap_or("");
-        if model == "<synthetic>" {
-            return;
-        }
-        let id = format!("local:claude:{message}");
-        let u = &m["usage"];
-        if u.is_object() {
-            let cached = count(u, "cache_read_input_tokens");
-            let input = count(u, "input_tokens") + cached + count(u, "cache_creation_input_tokens");
-            let mut r = row(&id, harness, session, model, at, "usage");
-            r["usage"] = json!({"kind":"tokens","scope":"turn","inputTokens":input,"outputTokens":count(u,"output_tokens"),"cacheReadTokens":cached});
-            // Multiple content blocks share one message; final snapshots can raise output usage.
-            if let Some(old) = s.rows.get(&id) {
-                for key in ["inputTokens", "outputTokens", "cacheReadTokens"] {
-                    r["usage"][key] = json!(count(&r["usage"], key).max(count(&old["usage"], key)));
-                }
-            }
-            s.rows.insert(id, r);
-        }
-        if let Some(blocks) = m["content"].as_array() {
-            for block in blocks {
-                if block["type"] == "tool_use" {
-                    if let Some(tool) = block["id"].as_str() {
-                        let id = format!("local:claude:tool:{tool}");
-                        let mut r = row(&id, harness, session, model, at, "activity");
-                        r["tool"] = block["name"].clone();
-                        s.rows.insert(id, r);
-                    }
-                }
-            }
-        }
+    if let Some(agent) = crate::harness::get(harness) {
+        agent.metrics_line(v, s);
     }
 }
 

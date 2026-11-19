@@ -1,5 +1,5 @@
 import { element, basename } from './dom.js';
-import { getHarness } from '../core/catalog.js';
+import { HARNESSES, getHarness } from '../core/catalog.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
 
@@ -19,7 +19,17 @@ export function combineSessions(local, conversations) {
 export function initSessions({list, detail, getConversations, fetchMetrics, navigate, native}) {
   let sessions = [], page = 0, selected = null, generation = 0, loading = null, listScroll = 0;
   const body = $('#sessions-body'), search = $('#sessions-search'), harness = $('#sessions-harness'), sort = $('#sessions-sort');
+  function renderHarnessFilter() {
+    const ids = [...new Set([...HARNESSES.map(item => item.id), ...sessions.map(session => session.harness).filter(Boolean)])];
+    const signature = ids.join('|');
+    if (harness.dataset.signature === signature) return;
+    const selected = harness.value;
+    harness.replaceChildren(new Option('All agents', ''), ...ids.map(id => new Option(getHarness(id)?.label || id, id)));
+    harness.value = ids.includes(selected) ? selected : '';
+    harness.dataset.signature = signature;
+  }
   function render() {
+    renderHarnessFilter();
     const query = search.value.trim().toLowerCase();
     const filtered = sessions.filter(session => (!harness.value || session.harness === harness.value) && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
     filtered.sort((a,b) => sort.value === 'title' ? a.title.localeCompare(b.title) : sort.value === 'oldest' ? a.updatedAt-b.updatedAt : b.updatedAt-a.updatedAt);

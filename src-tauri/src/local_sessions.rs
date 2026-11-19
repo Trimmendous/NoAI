@@ -62,100 +62,12 @@ fn timestamp(value: &Value) -> Option<i64> {
         .ok()
         .map(|date| date.timestamp())
 }
-fn content(value: &Value) -> String {
-    if let Some(text) = value.as_str() {
-        return text.into();
-    }
-    value
-        .as_array()
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter_map(|block| {
-                    block["text"].as_str().map(str::to_owned).or_else(|| {
-                        match block["type"].as_str() {
-                            Some("tool_use") => Some(format!(
-                                "{}\n{}",
-                                block["name"].as_str().unwrap_or("Tool"),
-                                block["input"]
-                            )),
-                            Some("tool_result") => Some(content(&block["content"])),
-                            _ => None,
-                        }
-                    })
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        })
-        .unwrap_or_default()
-}
 fn message(harness: &str, value: &Value) -> Option<Value> {
-    let payload = &value["payload"];
-    let mut activities = Vec::new();
-    let (role, text) = if harness == "codex" {
-        if value["type"] != "response_item" {
-            return None;
-        }
-        match payload["type"].as_str()? {
-            "message" => (
-                payload["role"].as_str().unwrap_or("assistant"),
-                content(&payload["content"]),
-            ),
-            "reasoning" => ("thinking", content(&payload["summary"])),
-            "function_call" | "custom_tool_call" => (
-                "tool",
-                format!(
-                    "{}\n{}",
-                    payload["name"].as_str().unwrap_or("Tool"),
-                    payload["arguments"]
-                        .as_str()
-                        .or(payload["input"].as_str())
-                        .unwrap_or("")
-                ),
-            ),
-            "function_call_output" | "custom_tool_call_output" => {
-                ("tool", content(&payload["output"]))
-            }
-            _ => return None,
-        }
-    } else {
-        if !matches!(value["type"].as_str(), Some("user" | "assistant")) {
-            return None;
-        }
-        let blocks = &value["message"]["content"];
-        let text = if let Some(blocks) = blocks.as_array() {
-            let mut texts = Vec::new();
-            for block in blocks {
-                match block["type"].as_str() {
-                    Some("text") => {
-                        if let Some(text) = block["text"].as_str() {
-                            texts.push(text.to_owned());
-                        }
-                    }
-                    Some("thinking") => {
-                        if let Some(text) = block["thinking"].as_str() {
-                            activities.push(json!({"kind":"thinking","text":text}));
-                        }
-                    }
-                    Some("tool_use" | "tool_result") => {
-                        activities.push(json!({"kind":"tool","text":content(&json!([block]))}))
-                    }
-                    _ => {} // Encrypted/redacted thinking has no readable text.
-                }
-            }
-            texts.join("\n\n")
-        } else {
-            content(blocks)
-        };
-        (
-            value["message"]["role"].as_str().unwrap_or("assistant"),
-            text,
-        )
-    };
-    if text.is_empty() && activities.is_empty() {
+    let message = crate::harness::get(harness)?.session_message(value)?;
+    if message.text.is_empty() && message.activities.is_empty() {
         return None;
     }
-    Some(json!({"role":role,"text":text,"at":timestamp(value),"activities":activities}))
+    Some(json!({"role":message.role,"text":message.text,"at":timestamp(value),"activities":message.activities}))
 }
 fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result<Value, String> {
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
@@ -173,29 +85,15 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
                 summary["startedAt"] = json!(at);
             }
         }
-        if harness == "codex" {
-            if value["type"] == "session_meta" {
-                if let Some(id) = value["payload"]["id"].as_str() {
-                    summary["sessionId"] = json!(id);
-                }
-                summary["projectPath"] = value["payload"]["cwd"].clone();
-            }
-            if value["type"] == "turn_context" {
-                if let Some(model) = value["payload"]["model"].as_str() {
-                    summary["model"] = json!(model);
-                }
-            }
-        } else {
-            if let Some(id) = value["sessionId"].as_str() {
+        if let Some(agent) = crate::harness::get(harness) {
+            let meta = agent.session_meta(&value);
+            if let Some(id) = meta.session_id {
                 summary["sessionId"] = json!(id);
             }
-            if let Some(cwd) = value["cwd"].as_str() {
-                summary["projectPath"] = json!(cwd);
+            if let Some(path) = meta.project_path {
+                summary["projectPath"] = json!(path);
             }
-            if let Some(model) = value["message"]["model"]
-                .as_str()
-                .filter(|model| *model != "<synthetic>")
-            {
+            if let Some(model) = meta.model {
                 summary["model"] = json!(model);
             }
         }
@@ -222,35 +120,13 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
     Ok(summary)
 }
 fn list(home: PathBuf) -> Result<Value, String> {
-    let codex = std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".codex"));
-    let claude = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".claude"));
     let mut files = Vec::new();
     let mut errors = 0;
-    discover(
-        &codex.join("sessions"),
-        "codex",
-        false,
-        &mut files,
-        &mut errors,
-    );
-    discover(
-        &codex.join("archived_sessions"),
-        "codex",
-        true,
-        &mut files,
-        &mut errors,
-    );
-    discover(
-        &claude.join("projects"),
-        "claude",
-        false,
-        &mut files,
-        &mut errors,
-    );
+    for agent in crate::harness::all() {
+        for root in agent.history_roots(&home) {
+            discover(&root.path, agent.id(), root.archived, &mut files, &mut errors);
+        }
+    }
     let mut index = INDEX
         .get_or_init(Default::default)
         .lock()

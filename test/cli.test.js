@@ -7,7 +7,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parse, defaultSocketPath, sendRequest } from '../bin/noai';
-import { serviceUnit, serviceFile } from '../scripts/systemd.mjs';
+import { serviceUnit, serviceFile } from '../scripts/service/systemd.mjs';
+import { launchdPlist, plistFile, launchdLabel } from '../scripts/service/launchd.mjs';
 
 test('dry run validates the same options and explicitly opts out of creation', () => {
   const args = ['jobs', 'create', '--title', 'First review', '--prompt', 'Summarize', '--every', '1d'];
@@ -92,8 +93,10 @@ test('manual retry defaults to one minute and validates a chosen schedule', () =
 test('parses auto-resume updates and XDG socket location', () => {
   assert.deepEqual(parse(['jobs', 'update-auto-resume', 'task-1', 'false']).request,
     { command: 'update_auto_resume', id: 'task-1', enabled: false });
-  assert.equal(defaultSocketPath({ XDG_DATA_HOME: '/tmp/example' }, '/home/test'),
+  assert.equal(defaultSocketPath({ XDG_DATA_HOME: '/tmp/example' }, '/home/test', 'linux'),
     '/tmp/example/dev.noai.desktop/control.sock');
+  assert.equal(defaultSocketPath({ XDG_DATA_HOME: '/tmp/example' }, '/Users/test', 'darwin'),
+    '/Users/test/Library/Application Support/dev.noai.desktop/control.sock');
 });
 
 test('works through a PATH symlink', () => {
@@ -121,7 +124,7 @@ test('parses service commands and quotes systemd unit fields', () => {
   assert.match(unit, /WantedBy=default.target/);
 });
 
-test('service install and lifecycle use only the fake user systemctl', () => {
+test('service install and lifecycle use only the fake user systemctl', { skip: process.platform !== 'linux' && 'systemd service is Linux-only' }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noai-service-test-'));
   try {
     const fakeSystemctl = path.join(dir, 'systemctl');
@@ -151,6 +154,51 @@ test('service install and lifecycle use only the fake user systemctl', () => {
       '--user stop noai.service', '--user disable --now noai.service', '--user daemon-reload',
       '--user is-active noai.service', '--user is-enabled noai.service',
     ]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('launchd plist escapes paths and restarts only on failure', () => {
+  const plist = launchdPlist('/tmp/a & <b>/noai', '/opt/homebrew/bin:/usr/bin', '/tmp/log');
+  assert.match(plist, /<string>\/tmp\/a &amp; &lt;b&gt;\/noai<\/string>\n\s*<string>--daemon<\/string>/);
+  assert.match(plist, /<key>SuccessfulExit<\/key>\n\s*<false\/>/);
+  assert.match(plist, /<key>RunAtLoad<\/key>\n\s*<true\/>/);
+  assert.match(plist, new RegExp(`<string>${launchdLabel}</string>`));
+  assert.equal(plistFile('/Users/example'), `/Users/example/Library/LaunchAgents/${launchdLabel}.plist`);
+});
+
+test('service lifecycle on macOS uses only the fake launchctl', { skip: process.platform !== 'darwin' && 'launchd service is macOS-only' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noai-launchd-test-'));
+  try {
+    const calls = path.join(dir, 'calls');
+    const loadedFlag = path.join(dir, 'loaded');
+    const binary = path.join(dir, 'noai binary');
+    fs.symlinkSync(process.execPath, binary);
+    fs.writeFileSync(path.join(dir, 'launchctl'), `#!/bin/sh
+printf "%s\\n" "$1" >> "$NOAI_TEST_CALLS"
+case "$1" in
+  print) if [ -f "$NOAI_TEST_LOADED" ]; then echo "	state = running"; exit 0; else exit 113; fi;;
+  bootstrap) touch "$NOAI_TEST_LOADED";;
+  bootout) rm -f "$NOAI_TEST_LOADED";;
+esac
+`, { mode: 0o755 });
+    const env = { ...process.env, HOME: dir, NOAI_TEST_CALLS: calls, NOAI_TEST_LOADED: loadedFlag, PATH: `${dir}:${process.env.PATH}` };
+    const cli = fileURLToPath(new URL('../bin/noai', import.meta.url));
+    const run = (...args) => spawnSync(process.execPath, [cli, 'service', ...args], { env, encoding: 'utf8' });
+    assert.equal(run('install', '--binary', binary).status, 0);
+    const file = path.join(dir, 'Library/LaunchAgents', `${launchdLabel}.plist`);
+    assert.match(fs.readFileSync(file, 'utf8'), /noai binary<\/string>/);
+    assert.match(run('status').stdout, /inactive, enabled/);
+    const started = run('start');
+    assert.equal(started.status, 0, started.stderr);
+    assert.match(run('status').stdout, /active, enabled/);
+    assert.equal(run('stop').status, 0);
+    assert.equal(run('uninstall').status, 0);
+    assert.equal(fs.existsSync(file), false);
+    assert.match(run('status').stdout, /inactive, disabled/);
+    const sequence = fs.readFileSync(calls, 'utf8').trim().split('\n');
+    assert.ok(sequence.includes('bootstrap') && sequence.includes('bootout'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

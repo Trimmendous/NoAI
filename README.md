@@ -7,7 +7,7 @@ A small local desktop workspace for coding-agent conversations. Built from scrat
 Prerequisites: Node.js 22+, Rust, the Tauri 2 CLI (`cargo install tauri-cli --version '^2'`), and [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/). On Linux, GTK 3 and WebKitGTK 4.1 are required. Install and authenticate Codex or Claude Code separately before using it in Noai.
 
 ```sh
-cd /home/trimendous/Code/noai
+cd /path/to/noai
 npm run desktop
 ```
 
@@ -21,6 +21,20 @@ npm run dev
 The preview can save appearance and conversations in browser storage, but it cannot access local agent processes. It never fabricates agent responses or usage information. The desktop uses its own persistent data directory, separate from the preview and from Jean.
 
 If a preview server is already running on port 1420, stop it before `npm run desktop`, which starts its own server. A compiled native build embeds its frontend and does not need a server.
+
+## Background service on macOS
+
+Build the desktop binary, then install and start a launchd LaunchAgent:
+
+```sh
+./bin/noai service install
+./bin/noai service start
+./bin/noai service status
+# Stop execution: ./bin/noai service stop
+# Remove service: ./bin/noai service uninstall
+```
+
+`install` writes `~/Library/LaunchAgents/dev.noai.daemon.plist`, which launchd starts at each login (`RunAtLoad`) and restarts after a crash (`KeepAlive` on unsuccessful exit). `stop` unloads it until the next login; `uninstall` removes it. Logs go to `~/Library/Logs/noai/daemon.log`. Installation captures the current PATH so the daemon finds your Codex and Claude executables; reinstall if those paths change. Data, including the control socket, lives in `~/Library/Application Support/dev.noai.desktop`. Without the service, opening the GUI starts a standalone daemon and logs to `daemon.log` in that directory. Noai does not wake a sleeping Mac.
 
 ## Background service on Linux
 
@@ -97,6 +111,8 @@ Every scheduled execution receives shared [unattended-job instructions](src-taur
 
 Codex uses `codex exec --json` (and `exec resume`). New scheduled jobs default to an explicit `workspace-write` sandbox with network enabled and `approval_policy="never"`, allowing project edits and commands without interactive prompts. Chat and older saved jobs retain their existing CLI configuration. New Claude jobs use `--permission-mode auto` for automatic permission review (requires provider/account/model support). Claude chat, older jobs, and the Existing CLI settings option use `dontAsk`: actions requiring interactive approval are denied. Auto review is not an OS sandbox, and denials still apply; Noai never falls back to bypass if auto review is unavailable. The **Dangerously bypass permissions** checkbox is off by default. When enabled for a chat or job, Codex gets `--dangerously-bypass-approvals-and-sandbox`; Claude gets `--dangerously-skip-permissions` instead of `dontAsk`. This choice persists for that chat/job, including quota retries. New chats and newly selected harnesses default to normal permissions. The CLI equivalent is `--dangerously-bypass-permissions true`. Interactive approvals remain a next-stage integration.
 
+Agent CLIs are found on PATH, then by asking your login shell (so your shell profile, active nvm/asdf version and custom installs win), then in common install locations (`~/.local/bin`, `~/.claude/local`, npm/bun/volta/pnpm/nvm/fnm directories, Homebrew, and per-OS locations). A Noai opened from Finder, the Dock or a desktop launcher therefore finds agents that only your shell profile adds to PATH. Agents run with their own directory and those locations added to PATH, so npm-installed CLIs find `node`. Set `NOAI_DATA_DIR` to run an isolated daemon, GUI and CLI against another data folder.
+
 Messages arrive in complete assistant blocks, rather than individual token deltas. The adapters reuse native CLI authentication and do not inspect or copy account credentials. CLI discovery confirms installation, not authentication. Errors such as expired sign-in are shown in the conversation.
 
 By default, closing the window hides Noai in the system tray. Disable this in Settings to close the window instead. **Quit Noai** quits the GUI; the daemon continues running. Use `noai service stop` to stop the systemd scheduler and its agent processes; waiting jobs remain saved. Interrupted running jobs require review after restart rather than automatic replay. No work can execute while the computer is asleep or powered off.
@@ -161,7 +177,19 @@ src-tauri/
   src/control.rs          Private local socket and durable event replay
   src/storage.rs          Atomic workspace writes
   src/lib.rs              Native application setup and shutdown
+  src/digest.rs           Daily digest prompt built from job history and local usage
+  src/harness/            Every agent CLI, behind one `Harness` trait (nothing else names an agent)
+    mod.rs                Trait, registry (`ALL`), shared token/transcript helpers
+    codex.rs              Codex: argv, JSON events, permissions, models, usage, history import
+    claude.rs             Claude Code: the same, for `claude --print --output-format stream-json`
+  src/platform/           All OS-specific behaviour (other modules never use cfg for OS logic)
+    mod.rs                Shared API: data dir, agent CLI discovery, child PATH
+    unix.rs               macOS + Linux: process groups, file modes, login-shell lookup
+    macos.rs              Application Support, launchd, Homebrew locations
+    linux.rs              XDG data, systemd, distro/snap/flatpak locations
+    windows.rs            %APPDATA%, taskkill, npm/winget locations (control socket still Unix-only)
 bin/noai                  Node CLI for the running desktop app
+scripts/service/          `noai service`: index.mjs picks systemd.mjs (Linux) or launchd.mjs (macOS)
 AGENTS.md                 Scheduling instructions for coding agents
 scripts/                  Dependency-free development server, build, checks
 test/                     Core unit tests and optional browser integration check
@@ -169,6 +197,22 @@ docs/                     Architecture and staged roadmap
 ```
 
 Jobs that are still **Scheduled** have an **Edit job** action. It opens the existing job form with its name, instructions, agent, model, project, next start time, recurrence, and resume settings. Saves are rejected atomically once the scheduler claims the occurrence. A recurring job can be edited again between runs; a stale editor cannot overwrite the next occurrence after a run has started. Previous runs retain their original configuration.
+
+## Adding an agent
+
+Noai is agent-agnostic. Each CLI is one file in `src-tauri/src/harness/` that implements the `Harness` trait:
+
+- **Identity:** id, label, and the executable it looks for.
+- **Running:** the headless arguments and how to read its JSON output.
+- **Settings:** its permission modes (the default first), its read-only mode for the digest, and its bypass text.
+- **Account:** model discovery, account usage and sign-in identity.
+- **History (optional):** where its session transcripts live and how to read them.
+
+Add the new type to `ALL` in `harness/mod.rs`. The app reads everything from that registry through `runtime_status`: agent pickers, permission menus, the Sessions filter, provider cards, history import, metrics and the digest. No frontend change is needed. The registry test checks that every agent is complete.
+
+## Daily digest
+
+Open **Digest** to turn on a daily report. Choose a time, an agent and a model, the same way as for a job. Each day the daemon gathers the last 24 hours of job runs (status, duration, tokens, tool use, errors, usage-limit waits), jobs needing attention, upcoming runs and local Codex/Claude usage, and puts that data in the digest's prompt. The agent replies with a Markdown report: needs attention, a per-job table, usage and a few insights. **Write one now** runs it immediately without moving the daily time. A failed digest does not stop tomorrow's. The digest runs read-only (Codex `read-only`, Claude `dontAsk`) in `~/.noai/digest`, uses a small amount of the chosen agent's allowance, and is kept out of the Jobs list. Its schedule is a fixed 24-hour interval from the chosen time, so it shifts by an hour across daylight-saving changes until calendar recurrence ships.
 
 ## Local sessions
 

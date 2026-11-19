@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::{
     env, fs,
     io::Read,
@@ -25,20 +23,17 @@ pub enum JobPermissions {
 }
 
 impl JobPermissions {
+    /// The agent's default job mode (the first it lists).
     pub fn for_harness(harness: &str) -> Self {
-        if harness == "claude" {
-            Self::AutoReview
-        } else {
-            Self::WorkspaceNetwork
-        }
+        crate::harness::get(harness)
+            .and_then(|harness| harness.permissions().first())
+            .map(|mode| mode.id)
+            .unwrap_or(Self::ProviderDefault)
     }
 
     pub fn validate(self, harness: &str) -> Result<(), String> {
-        let supported = match harness {
-            "codex" => self != Self::AutoReview,
-            "claude" => matches!(self, Self::ProviderDefault | Self::AutoReview),
-            _ => false,
-        };
+        let supported = crate::harness::get(harness)
+            .is_some_and(|harness| harness.permissions().iter().any(|mode| mode.id == self));
         if supported {
             Ok(())
         } else {
@@ -75,6 +70,9 @@ pub struct HarnessStatus {
     pub id: &'static str,
     pub label: &'static str,
     pub installed: bool,
+    /// Job permission modes, the default first.
+    pub permissions: &'static [crate::harness::Permission],
+    pub bypass_description: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,31 +129,21 @@ impl RunEvent {
 }
 
 pub fn find_binary(name: &str) -> Option<PathBuf> {
-    let paths = env::var_os("PATH")?;
-    for dir in env::split_paths(&paths) {
-        #[cfg(windows)]
-        let candidates = [dir.join(format!("{name}.exe"))];
-        #[cfg(not(windows))]
-        let candidates = [dir.join(name)];
-        for path in candidates {
-            if path.is_file() {
-                return Some(path);
-            }
-        }
-    }
-    None
+    crate::platform::find_executable(name)
 }
 
 pub fn status() -> RuntimeStatus {
-    let harnesses = [("codex", "Codex"), ("claude", "Claude")]
-        .into_iter()
-        .map(|(id, label)| {
-            let path = find_binary(id);
+    let harnesses = crate::harness::all()
+        .iter()
+        .map(|harness| {
+            let path = find_binary(harness.executable());
             let version = path.as_ref().and_then(|binary| bounded_version(binary));
             HarnessStatus {
-                id,
-                label,
+                id: harness.id(),
+                label: harness.label(),
                 installed: path.is_some(),
+                permissions: harness.permissions(),
+                bypass_description: harness.bypass_description(),
                 version,
                 path: path.map(|path| path.to_string_lossy().into_owned()),
                 detail: None,
@@ -182,8 +170,8 @@ fn bounded_version(binary: &Path) -> Option<String> {
         .open(&output_path)
         .ok()?;
     let mut command = std::process::Command::new(binary);
-    #[cfg(unix)]
-    command.process_group(0);
+    command.env("PATH", crate::platform::child_path(binary));
+    crate::platform::isolate_process_group(&mut command);
     let mut child = match command
         .arg("--version")
         .stdin(Stdio::null())
@@ -203,11 +191,7 @@ fn bounded_version(binary: &Path) -> Option<String> {
             Ok(Some(status)) => break status.success(),
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
             _ => {
-                #[cfg(unix)]
-                // SAFETY: this version process is its own process-group leader.
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
-                }
+                crate::platform::kill_process_tree(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 break false;
@@ -254,20 +238,22 @@ pub fn spawn(request: &RunRequest) -> Result<Child, String> {
     if let Some(resume_id) = &request.resume_id {
         safe_option(resume_id, "resume ID")?;
     }
-    if !matches!(request.harness.as_str(), "codex" | "claude") {
-        return Err(format!("Unsupported harness: {}", request.harness));
-    }
+    let harness = crate::harness::require(&request.harness)?;
     if let Some(permissions) = request.permissions {
         permissions.validate(&request.harness)?;
     }
-    let binary = find_binary(&request.harness)
-        .ok_or_else(|| format!("{} CLI is not installed on PATH", request.harness))?;
-    let mut command = Command::new(binary);
+    let binary = find_binary(harness.executable()).ok_or_else(|| {
+        format!(
+            "{} CLI was not found on PATH or in common install locations",
+            harness.label()
+        )
+    })?;
+    let mut command = Command::new(&binary);
     command.current_dir(project);
+    command.env("PATH", crate::platform::child_path(&binary));
     // Give the CLI and any tools it launches a process group owned by this run.
-    #[cfg(unix)]
-    command.as_std_mut().process_group(0);
-    command.args(harness_args(request));
+    crate::platform::isolate_process_group(command.as_std_mut());
+    command.args(harness.args(request));
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -278,95 +264,19 @@ pub fn spawn(request: &RunRequest) -> Result<Child, String> {
         .map_err(|error| format!("Cannot start {}: {error}", request.harness))
 }
 
-fn harness_args(request: &RunRequest) -> Vec<String> {
-    let mut args = Vec::new();
-    match request.harness.as_str() {
-        "codex" => {
-            args.push("exec".into());
-            if request.resume_id.is_some() {
-                args.push("resume".into());
-            }
-            args.extend(["--json".into(), "--skip-git-repo-check".into()]);
-            if request.dangerously_bypass_permissions {
-                args.push("--dangerously-bypass-approvals-and-sandbox".into());
-            } else if let Some(permissions) = request
-                .permissions
-                .filter(|mode| *mode != JobPermissions::ProviderDefault)
-            {
-                // Config overrides are supported by both exec and exec resume.
-                let sandbox = if permissions == JobPermissions::ReadOnly {
-                    "read-only"
-                } else {
-                    "workspace-write"
-                };
-                args.extend([
-                    "-c".into(),
-                    format!("sandbox_mode=\"{sandbox}\""),
-                    "-c".into(),
-                    "approval_policy=\"never\"".into(),
-                ]);
-                args.extend([
-                    "-c".into(),
-                    format!(
-                        "sandbox_workspace_write.network_access={}",
-                        permissions == JobPermissions::WorkspaceNetwork
-                    ),
-                ]);
-            }
-            if let Some(model) = &request.model {
-                args.extend(["--model".into(), model.clone()]);
-            }
-            if let Some(resume_id) = &request.resume_id {
-                args.push(resume_id.clone());
-            }
-            args.push("-".into());
-        }
-        "claude" => {
-            args.extend([
-                "--print".into(),
-                "--output-format".into(),
-                "stream-json".into(),
-                "--verbose".into(),
-            ]);
-            if request.dangerously_bypass_permissions {
-                args.push("--dangerously-skip-permissions".into());
-            } else {
-                // Headless approval requests cannot be answered through this adapter.
-                let mode = if request.permissions == Some(JobPermissions::AutoReview) {
-                    "auto"
-                } else {
-                    "dontAsk"
-                };
-                args.extend(["--permission-mode".into(), mode.into()]);
-            }
-            if let Some(resume_id) = &request.resume_id {
-                args.extend(["--resume".into(), resume_id.clone()]);
-            }
-            if let Some(model) = &request.model {
-                args.extend(["--model".into(), model.clone()]);
-            }
-        }
-        _ => unreachable!(),
-    }
-    args
-}
 
 pub fn parse_line(request: &RunRequest, line: &str) -> Vec<RunEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
-    match request.harness.as_str() {
-        "codex" => parse_codex(request, &value),
-        "claude" => parse_claude(request, &value),
-        _ => Vec::new(),
-    }
+    crate::harness::get(&request.harness)
+        .map(|harness| harness.parse(request, &value))
+        .unwrap_or_default()
 }
 
 /// Only schedules retries for explicit temporary provider limits with a stated delay.
 pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Option<(u64, String)> {
-    if !matches!(harness, "codex" | "claude") {
-        return None;
-    }
+    let agent = crate::harness::get(harness)?;
     let lower = message.to_ascii_lowercase();
     if [
         "billing",
@@ -407,7 +317,7 @@ pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Opt
             return None;
         }
         now_epoch.checked_add(seconds)?
-    } else if harness == "codex" {
+    } else if agent.local_clock_resets() {
         let marker = lower.find("try again at ")? + "try again at ".len();
         clock_reset(&lower[marker..], now_epoch, &chrono::Local)?
     } else {
@@ -416,7 +326,7 @@ pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Opt
     Some((reset, format!("{harness} timed usage limit")))
 }
 
-// Codex formats time-only reset messages in the host's local timezone. Reject
+// Some CLIs format time-only resets in the host's local timezone. Reject
 // unknown suffixes/zones and ambiguous/nonexistent DST times instead of guessing.
 fn clock_reset<T: chrono::TimeZone>(input: &str, now_epoch: u64, timezone: &T) -> Option<u64> {
     use chrono::TimeZone;
@@ -456,9 +366,7 @@ pub fn classify_structured_quota(
     value: &Value,
     now_epoch: u64,
 ) -> Option<(u64, String)> {
-    if !matches!(harness, "codex" | "claude") {
-        return None;
-    }
+    crate::harness::get(harness)?;
     let code = value.get("code").and_then(Value::as_str).unwrap_or("");
     let rejected = value.get("status").and_then(Value::as_str) == Some("rejected")
         || matches!(code, "rate_limit_exceeded" | "usage_limit_reached");
@@ -523,200 +431,15 @@ fn parse_duration_seconds(input: &str) -> Option<u64> {
     found.then_some(total)
 }
 
-fn token_event(
-    request: &RunRequest,
-    counts: &Value,
-    camel: bool,
-    cumulative: bool,
-    per_model: bool,
-) -> Option<RunEvent> {
-    let input = counts
-        .get(if camel { "inputTokens" } else { "input_tokens" })?
-        .as_u64()?;
-    let output = counts
-        .get(if camel {
-            "outputTokens"
-        } else {
-            "output_tokens"
-        })?
-        .as_u64()?;
-    let cached = counts
-        .get(if camel {
-            "cacheReadInputTokens"
-        } else if request.harness == "codex" {
-            "cached_input_tokens"
-        } else {
-            "cache_read_input_tokens"
-        })
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let written = counts
-        .get(if camel {
-            "cacheCreationInputTokens"
-        } else {
-            "cache_creation_input_tokens"
-        })
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let mut event = RunEvent::new(request, "usage", None);
-    event.usage = Some(
-        serde_json::json!({"kind":"tokens","inputTokens":if request.harness == "claude" {input.saturating_add(cached).saturating_add(written)} else {input},"outputTokens":output,"cacheReadTokens":cached,"scope":if cumulative {"session"} else {"turn"},"perModel":per_model,"resumed":request.resume_id.is_some()}),
-    );
-    Some(event)
-}
 
-fn parse_codex(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
-    match value.get("type").and_then(Value::as_str).unwrap_or("") {
-        "thread.started" => value
-            .get("thread_id")
-            .and_then(Value::as_str)
-            .map(|id| {
-                let mut event = RunEvent::new(request, "session", None);
-                event.resume_id = Some(id.to_owned());
-                vec![event]
-            })
-            .unwrap_or_default(),
-        "turn.completed" => token_event(request, &value["usage"], false, true, false)
-            .into_iter()
-            .collect(),
-        "item.completed" => {
-            let item = &value["item"];
-            match item.get("type").and_then(Value::as_str).unwrap_or("") {
-                "agent_message" => item
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .map(|text| vec![RunEvent::new(request, "text", Some(text.into()))])
-                    .unwrap_or_default(),
-                "command_execution" | "file_change" | "mcp_tool_call" | "web_search" => {
-                    vec![RunEvent::new(
-                        request,
-                        "activity",
-                        item.get("type").and_then(Value::as_str).map(str::to_owned),
-                    )]
-                    .into_iter()
-                    .map(|mut event| {
-                        event.usage = Some(
-                            serde_json::json!({"toolId":item.get("id"),"toolStatus":"completed"}),
-                        );
-                        event
-                    })
-                    .collect()
-                }
-                _ => Vec::new(),
-            }
-        }
-        "turn.failed" | "error" => vec![RunEvent::new(
-            request,
-            "error",
-            value["error"]["message"]
-                .as_str()
-                .or_else(|| value["message"].as_str())
-                .map(str::to_owned)
-                .or_else(|| Some("Codex run failed".into())),
-        )],
-        _ => Vec::new(),
-    }
-}
 
-fn parse_claude(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
-    let mut events = Vec::new();
-    if let Some(id) = value.get("session_id").and_then(Value::as_str) {
-        let mut event = RunEvent::new(request, "session", None);
-        event.resume_id = Some(id.to_owned());
-        events.push(event);
-    }
-    if value["type"] == "result" {
-        if let Some(models) = value
-            .get("modelUsage")
-            .and_then(Value::as_object)
-            .filter(|models| !models.is_empty())
-        {
-            for (model, counts) in models {
-                if let Some(mut event) = token_event(request, counts, true, true, true) {
-                    event.model = Some(model.clone());
-                    event.resume_id = value["session_id"]
-                        .as_str()
-                        .map(str::to_owned)
-                        .or_else(|| request.resume_id.clone());
-                    events.push(event);
-                }
-            }
-        } else if let Some(mut event) = token_event(request, &value["usage"], false, false, false) {
-            event.resume_id = value["session_id"].as_str().map(str::to_owned);
-            events.push(event);
-        }
-    }
-    match value.get("type").and_then(Value::as_str).unwrap_or("") {
-        "rate_limit_event" => {
-            let info = value.get("rate_limit_info").unwrap_or(value);
-            let mut usage = serde_json::Map::new();
-            for key in [
-                "status",
-                "resetsAt",
-                "resets_at",
-                "rateLimitType",
-                "rate_limit_type",
-            ] {
-                if let Some(item) = info.get(key) {
-                    if item.is_string() || item.is_number() {
-                        usage.insert(key.to_owned(), item.clone());
-                    }
-                }
-            }
-            if !usage.is_empty() {
-                let mut event = RunEvent::new(request, "usage", None);
-                event.usage = Some(Value::Object(usage));
-                events.push(event);
-            }
-        }
-        "assistant" => {
-            if let Some(blocks) = value["message"]["content"].as_array() {
-                for block in blocks {
-                    match block.get("type").and_then(Value::as_str).unwrap_or("") {
-                        "text" => {
-                            if let Some(text) = block.get("text").and_then(Value::as_str) {
-                                events.push(RunEvent::new(request, "text", Some(text.into())));
-                            }
-                        }
-                        "tool_use" => events.push(RunEvent::new(
-                            request,
-                            "activity",
-                            block.get("name").and_then(Value::as_str).map(str::to_owned),
-                        )),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        "result" if value["is_error"].as_bool() == Some(true) => {
-            events.push(RunEvent::new(
-                request,
-                "error",
-                value["result"].as_str().map(str::to_owned).or_else(|| {
-                    value["errors"].as_array().map(|errors| {
-                        errors
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                }),
-            ));
-        }
-        _ => {}
-    }
-    for event in &mut events {
-        if event.kind != "usage" {
-            if let Some(model) = value["message"]["model"].as_str() {
-                event.model = Some(model.into());
-            }
-        }
-    }
-    events
-}
 
 #[cfg(test)]
 mod tests {
+    fn harness_args(request: &RunRequest) -> Vec<String> {
+        crate::harness::require(&request.harness).unwrap().args(request)
+    }
+
     use super::*;
 
     fn request(harness: &str) -> RunRequest {
