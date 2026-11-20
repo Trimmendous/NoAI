@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0e0e0f" />
+    <meta name="theme-color" content="#111112" />
     <meta name="description" content="Noai — a quiet place to work with coding agents." />
     <title>Noai</title>
     <script src="./js/theme-init.js"></script>
@@ -26,7 +26,7 @@
 
           <button id="choose-project" class="project-picker" type="button" aria-label="Choose project">
             <span class="project-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
-            <span class="project-copy"><span class="eyebrow">Current project</span><span id="project-label" class="project-name">Choose a folder</span></span>
+            <span class="project-copy"><span class="eyebrow">Project</span><span id="project-label" class="project-name">Choose a folder</span></span>
             <svg class="project-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10 3 3 3-3" /></svg>
           </button>
 
@@ -73,7 +73,6 @@
               <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
               <div id="chat-welcome" class="chat-welcome">
                 <div class="welcome-mark" aria-hidden="true"><svg class="wordmark-glyph" viewBox="-20 0 94 100" aria-hidden="true"><g transform="skewX(-11)"><rect class="wordmark-stem" x="6" y="0" width="17" height="100" /><g class="wordmark-cursor"><rect x="23" y="42" width="30" height="15" /><rect x="53" y="0" width="17" height="100" /></g></g></svg></div>
-                <p class="welcome-kicker">A clear space to build</p>
                 <h2>What are we working on?</h2>
                 <p class="welcome-description">Ask your coding agent to explore, explain, or make a change. Without a chosen project, Noai creates a fresh folder for the conversation.</p>
                 <div class="starter-list" aria-label="Suggested prompts">
@@ -103,12 +102,12 @@
             </section>
 
             <section id="view-accounts" class="page-view" aria-labelledby="accounts-title" hidden>
-              <div class="page-heading page-heading-with-action"><div><p class="page-kicker">Connections</p><h2 id="accounts-title">Accounts &amp; usage</h2><p>See your coding agents, account plans, and reported usage when available.</p></div><button id="refresh-accounts" class="secondary-button" type="button">Refresh</button></div>
+              <div class="page-heading page-heading-with-action"><div><h2 id="accounts-title">Accounts &amp; usage</h2><p>See your coding agents, account plans, and reported usage when available.</p></div><button id="refresh-accounts" class="secondary-button" type="button">Refresh</button></div>
               <div id="account-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◌</span><h3>Checking your accounts</h3><p>Connected agents and usage will appear here.</p></div></div>
             </section>
 
             <section id="view-home" class="page-view home-view" aria-labelledby="home-title" hidden>
-              <div class="page-heading"><p class="page-kicker">Your local workspace</p><h2 id="home-title">A little perspective.</h2><p>Explore your agents’ activity, one useful signal at a time.</p></div>
+              <div class="page-heading"><h2 id="home-title">Overview</h2><p>Explore your agents’ activity, one useful signal at a time.</p></div>
               <section class="metrics-section" aria-labelledby="metrics-title">
                 <div class="scheduled-list-heading"><h3 id="metrics-title">Usage &amp; tools</h3><button id="metrics-refresh" class="secondary-button" type="button">Refresh metrics</button></div>
                 <p id="metrics-status" class="metrics-status" role="status">Loading local agent history and Noai activity.</p>
@@ -123,26 +122,27 @@
                 <p id="metrics-job-summary" class="metrics-job-summary" role="status"></p>
                 <div id="metrics-insights" class="metrics-insights"></div>
                 <figure class="metrics-figure"><h3>Usage over time</h3><div id="metrics-chart"></div><figcaption id="metrics-chart-caption"></figcaption></figure>
+                <figure class="metrics-figure metrics-outcomes-figure"><h3>Calls and errors</h3><div id="metrics-outcomes"></div><figcaption>Successful calls are model responses plus tool calls that worked. Tool failures happened on this computer; connection, rate-limit and API errors came from reaching the provider. Read from local agent history; Noai jobs are included once their agent records them.</figcaption></figure>
                 <details class="metrics-daily-section"><summary>Explore daily totals</summary><section aria-labelledby="metrics-daily-title"><h3 id="metrics-daily-title">Daily totals</h3><div class="metrics-table-wrap"><table class="metrics-table metrics-daily-table"><thead><tr><th scope="col">Date</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cached input</th><th scope="col">Total tokens</th><th scope="col">Tool events</th></tr></thead><tbody id="metrics-daily"></tbody></table><p id="metrics-daily-empty" class="metrics-empty">No recorded activity for these filters.</p></div><p class="metrics-daily-note">Dates use your local time. Cached input is included in input and total tokens.</p></section></details>
                 <section class="metrics-tools-section" aria-label="Tool activity breakdown"><h3>Tool activity</h3><div id="metrics-tools" class="metrics-tools"></div></section>
                 <div class="metrics-table-wrap"><table class="metrics-table"><thead><tr><th scope="col">Harness</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Tool events</th><th scope="col">Sessions / runs</th></tr></thead><tbody id="metrics-breakdown"></tbody></table><p id="metrics-breakdown-empty" class="metrics-empty">No recorded activity for these filters.</p></div>
               </section>
             </section>
             <section id="view-activity" class="page-view" aria-labelledby="activity-title" hidden>
-              <div class="page-heading"><p class="page-kicker">Timeline</p><h2 id="activity-title">Activity</h2><p>Follow what your coding agents have been doing across conversations.</p></div>
+              <div class="page-heading"><h2 id="activity-title">Activity</h2><p>Follow what your coding agents have been doing across conversations.</p></div>
               <section id="jobs-section" class="jobs-section" aria-labelledby="jobs-title" hidden><h3 id="jobs-title">Waiting &amp; scheduled</h3><div id="resume-list" class="page-list"></div></section>
               <div id="activity-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◇</span><h3>No activity yet</h3><p>Start a conversation to see activity here.</p></div></div>
             </section>
             <section id="view-sessions" class="page-view sessions-view" aria-labelledby="sessions-heading" hidden>
-              <div class="page-heading"><p class="page-kicker">Your workspace</p><h2 id="sessions-heading">Sessions</h2><p>Every conversation, in one place. Pick up the story behind any session.</p></div>
+              <div class="page-heading"><h2 id="sessions-heading">Sessions</h2><p>Every conversation, in one place. Pick up the story behind any session.</p></div>
               <div class="sessions-toolbar">
                 <label class="sessions-search"><span class="sr-only">Search sessions</span><input id="sessions-search" class="text-field" type="search" placeholder="Search sessions, projects, models…" /></label>
                 <label><span class="sr-only">Session harness</span><select id="sessions-harness" class="text-field"><option value="">All agents</option></select></label>
-                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="text-field"><option value="recent">Recently updated</option><option value="oldest">Oldest first</option><option value="title">Name</option></select></label>
+                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="text-field"><option value="recent">Recently updated</option><option value="oldest">Oldest first</option><option value="title">Name</option><option value="tokens">Most tokens</option><option value="context">Fullest context</option></select></label>
                 <button id="sessions-refresh" class="secondary-button" type="button">Refresh</button>
               </div>
               <div class="sessions-list-meta"><span id="sessions-count"></span><span id="sessions-status" role="status"></span></div>
-              <div class="sessions-table-wrap"><table class="sessions-table"><caption class="sr-only">Local sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Project</th><th scope="col">Agent / model</th><th scope="col">Messages</th><th scope="col">Updated</th></tr></thead><tbody id="sessions-body"></tbody></table></div>
+              <div class="sessions-table-wrap"><table class="sessions-table"><caption class="sr-only">Local sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Project</th><th scope="col">Agent / model</th><th scope="col">Context</th><th scope="col">Tokens</th><th scope="col">Messages</th><th scope="col">Updated</th></tr></thead><tbody id="sessions-body"></tbody></table></div>
               <p id="sessions-empty" class="scheduled-empty" hidden>No sessions match. Try a different search or agent.</p>
               <nav class="scheduled-pagination sessions-pagination" aria-label="Session pages"><button id="sessions-previous" class="secondary-button" type="button">Previous</button><span id="sessions-page"></span><button id="sessions-next" class="secondary-button" type="button">Next</button></nav>
             </section>
@@ -158,16 +158,16 @@
             </section>
             <section id="view-job" class="page-view job-detail-view" aria-labelledby="job-heading" hidden>
               <div class="session-detail-nav"><button id="job-back" class="secondary-button" type="button">← Back to Jobs</button><button id="job-refresh" class="secondary-button" type="button">Refresh job</button></div>
-              <div class="page-heading"><p class="page-kicker">Job details</p><h2 id="job-heading" tabindex="-1"></h2></div>
+              <div class="page-heading"><h2 id="job-heading" tabindex="-1"></h2></div>
               <div id="job-content"></div>
             </section>
             <section id="view-job-conversation" class="page-view job-conversation-view" aria-labelledby="job-conversation-heading" hidden>
               <div class="session-detail-nav"><button id="job-conversation-back" class="secondary-button" type="button">← Back to job</button></div>
-              <div class="page-heading"><p class="page-kicker">Conversation</p><h2 id="job-conversation-heading" tabindex="-1"></h2></div>
+              <div class="page-heading"><h2 id="job-conversation-heading" tabindex="-1"></h2></div>
               <div id="job-conversation-stream" class="job-conversation-stream"></div>
             </section>
             <section id="view-jobs" class="page-view scheduled-view" aria-labelledby="scheduled-title" hidden>
-              <div class="page-heading"><p class="page-kicker">Automation</p><h2 id="scheduled-title">Jobs</h2><p>A little work off your plate. Follow your scheduled jobs and see how each run went.</p></div>
+              <div class="page-heading"><h2 id="scheduled-title">Jobs</h2><p>A little work off your plate. Follow your scheduled jobs and see how each run went.</p></div>
               <details class="job-guide" id="job-guide">
                 <summary>Your first job · desktop and CLI guide</summary>
                 <p>Read this guide without launching an agent or using provider allowance. Close it to skip; open it again any time.</p>
@@ -224,7 +224,7 @@
               </form>
             </section>
             <section id="view-digest" class="page-view digest-view" aria-labelledby="digest-title" hidden>
-              <div class="page-heading"><p class="page-kicker">Automation</p><h2 id="digest-title">Daily digest</h2><p>Each day, an agent you choose reads the last 24 hours of your jobs and Codex/Claude usage and writes a short report: what ran, what failed, what is waiting, and what to look at.</p></div>
+              <div class="page-heading"><h2 id="digest-title">Daily digest</h2><p>Each day, an agent you choose reads the last 24 hours of your jobs and Codex/Claude usage and writes a short report: what ran, what failed, what is waiting, and what to look at.</p></div>
               <form id="digest-form" class="scheduled-form digest-form" autocomplete="off">
                 <label class="setting-toggle digest-toggle"><input id="digest-enabled" type="checkbox" /><span><strong>Write a daily digest</strong><small id="digest-schedule-status">Off</small></span></label>
                 <div class="scheduled-grid">
@@ -244,7 +244,7 @@
           </main>
 
           <aside id="details-panel" class="details-panel" aria-label="Conversation details" hidden>
-            <div class="details-heading"><div><p class="eyebrow">Context</p><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+            <div class="details-heading"><div><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
             <div id="details-content" class="details-content"><p class="details-empty">Project and conversation details will appear here.</p></div>
           </aside>
         </div>
@@ -252,7 +252,7 @@
     </div>
 
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><p class="page-kicker">Make it yours</p><h2 id="settings-title">Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+      <div class="dialog-heading"><div><h2 id="settings-title">Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
       <div class="dialog-body">
         <fieldset class="settings-group"><legend>Appearance</legend><p>Choose how Noai looks on this device.</p><div id="theme-options" class="segmented-options" role="radiogroup" aria-label="Appearance"><label><input type="radio" name="theme" value="system" /><span>System</span></label><label><input type="radio" name="theme" value="light" /><span>Light</span></label><label><input type="radio" name="theme" value="dark" /><span>Dark</span></label></div></fieldset>
         <fieldset class="settings-group"><legend>Accent color</legend><p>A small touch of color throughout your workspace.</p><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent color"><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label></div></fieldset>
@@ -261,14 +261,14 @@
     </dialog>
     <dialog id="model-dialog" class="model-dialog" aria-labelledby="model-dialog-title">
       <form id="custom-model-form" method="dialog">
-        <div class="dialog-heading"><div><p class="page-kicker">Model</p><h2 id="model-dialog-title">Use a custom model</h2></div></div>
+        <div class="dialog-heading"><div><h2 id="model-dialog-title">Use a custom model</h2></div></div>
         <div class="dialog-body"><label class="field-label" for="custom-model-input">Model ID</label><input id="custom-model-input" class="text-field" name="model" type="text" placeholder="Enter a model ID" required autocomplete="off" spellcheck="false" /><p class="field-help">Use the exact model ID supported by your selected agent.</p></div>
         <div class="dialog-actions"><button id="model-cancel" class="secondary-button" type="button">Cancel</button><button id="model-save" class="primary-button" type="submit">Use model</button></div>
       </form>
     </dialog>
     <dialog id="edit-dialog" class="edit-dialog" aria-labelledby="edit-title">
       <form id="edit-form" method="dialog">
-        <div class="dialog-heading"><div><p class="page-kicker">Conversation</p><h2 id="edit-title">Rename conversation</h2></div></div>
+        <div class="dialog-heading"><div><h2 id="edit-title">Rename conversation</h2></div></div>
         <div class="dialog-body"><p id="edit-description" class="dialog-description">Choose a name for this conversation.</p><label id="edit-label" class="field-label" for="edit-input">Conversation name</label><input id="edit-input" class="text-field" name="title" type="text" maxlength="160" autocomplete="off" /></div>
         <div class="dialog-actions"><button id="edit-cancel" class="secondary-button" type="button">Cancel</button><button id="edit-confirm" class="primary-button" type="submit">Save</button></div>
       </form>

@@ -49,7 +49,9 @@ pub fn start(dir: PathBuf, home: PathBuf) {
         })
         .clone();
     std::thread::spawn(move || {
-        let path = dir.join("local-metrics-v1.json");
+        // v2 added tool and API outcomes; rescan history once to pick them up.
+        let _ = fs::remove_file(dir.join("local-metrics-v1.json"));
+        let path = dir.join("local-metrics-v2.json");
         let mut cache: Cache = fs::read(&path)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -187,6 +189,10 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
             || line.contains("turn_context")
             || line.contains("function_call")
             || line.contains("custom_tool_call")
+            || line.contains("tool_result")
+            || line.contains("api_error")
+            || line.contains("stream_error")
+            || line.contains("\"type\":\"error\"")
             || line.contains("\"assistant\""))
         {
             continue;

@@ -2,14 +2,25 @@
 
 use super::{
     config_dir, content_text, token_event, BoxFuture, Harness, HistoryRoot, Permission,
-    SessionMessage, SessionMeta, TokenKeys,
+    SessionMessage, SessionMeta, SessionUsage, TokenKeys, Tokens,
 };
 use crate::adapters::{find_binary, JobPermissions, RunEvent, RunRequest};
 use crate::local_metrics::{count, row, timestamp, FileState};
-use crate::providers::{cache_identity, now, unavailable, HarnessModel, ProviderUsageSnapshot};
+use crate::providers::{
+    cache_identity, now, unavailable, HarnessModel, ProviderUsageSnapshot, ProviderUsageWindow,
+};
 use serde_json::{json, Value};
-use std::{path::Path, process::Stdio, time::Duration};
-use tokio::{process::Command, time::timeout};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::Command,
+    time::timeout,
+};
 
 pub struct Claude;
 
@@ -102,6 +113,22 @@ impl Harness for Claude {
         Box::pin(async { claude_auth().await.ok().and_then(|auth| claude_identity(&auth)) })
     }
 
+    fn exhausted_reset(&self, now_epoch: u64) -> BoxFuture<Option<u64>> {
+        Box::pin(async move {
+            let (at, info) = read_limits()?;
+            // Only a fresh report may postpone a retry.
+            if now_epoch.saturating_sub(at) > 15 * 60 {
+                return None;
+            }
+            limit_windows(&info)
+                .into_iter()
+                .filter(|window| window.used_percent.is_some_and(|used| used >= 100.0))
+                .filter_map(|window| window.resets_at)
+                .filter(|reset| *reset > now_epoch && *reset - now_epoch <= 8 * 24 * 3600)
+                .max()
+        })
+    }
+
     fn history_roots(&self, home: &Path) -> Vec<HistoryRoot> {
         vec![HistoryRoot {
             path: config_dir(home, "CLAUDE_CONFIG_DIR", ".claude").join("projects"),
@@ -159,10 +186,53 @@ impl Harness for Claude {
         })
     }
 
-    fn metrics_line(&self, v: &Value, s: &mut FileState) {
-        let harness = self.id();
+    fn session_usage(&self, v: &Value, usage: &mut SessionUsage) {
         if v["type"] != "assistant" {
             return;
+        }
+        let m = &v["message"];
+        let (Some(id), Some(u)) = (m["id"].as_str(), m["usage"].as_object()) else {
+            return;
+        };
+        let model = m["model"].as_str().unwrap_or("");
+        if model == "<synthetic>" {
+            return;
+        }
+        let read = |key: &str| u.get(key).and_then(Value::as_u64).unwrap_or(0);
+        let call = Tokens {
+            input: read("input_tokens"),
+            cache_read: read("cache_read_input_tokens"),
+            cache_write: read("cache_creation_input_tokens"),
+            output: read("output_tokens"),
+        };
+        let call = usage
+            .calls
+            .get(id)
+            .map_or(call, |previous| previous.max(call));
+        usage.calls.insert(id.to_owned(), call);
+        if !v["isSidechain"].as_bool().unwrap_or(false) {
+            let used = call.total();
+            usage.context_used = Some(used);
+            usage.context_window = Some(context_window(model, used));
+        }
+    }
+
+    fn subagent_parent(&self, path: &Path) -> Option<PathBuf> {
+        // <project>/<session id>/subagents/agent-*.jsonl belongs to <project>/<session id>.jsonl.
+        let folder = path.parent()?;
+        if folder.file_name()? != "subagents" {
+            return None;
+        }
+        Some(folder.parent()?.with_extension("jsonl"))
+    }
+
+    fn metrics_line(&self, v: &Value, s: &mut FileState) {
+        let harness = self.id();
+        match v["type"].as_str() {
+            Some("user") => return outcome_rows(harness, v, s),
+            Some("system") if v["subtype"] == "api_error" => return api_error_row(harness, v, s),
+            Some("assistant") => {}
+            _ => return,
         }
         let m = &v["message"];
         let Some(message) = m["id"].as_str() else {
@@ -174,6 +244,7 @@ impl Harness for Claude {
         if model == "<synthetic>" {
             return;
         }
+        s.model = model.into();
         let id = format!("local:claude:{message}");
         let u = &m["usage"];
         if u.is_object() {
@@ -202,6 +273,59 @@ impl Harness for Claude {
             }
         }
     }
+}
+
+/// Context window size. Transcripts don't record the 1M-token option, so a call
+/// past 200K is the only sign of it.
+fn context_window(model: &str, used: u64) -> u64 {
+    if model.contains("[1m]") || used > 200_000 {
+        1_000_000
+    } else {
+        200_000
+    }
+}
+
+/// One outcome row per tool result: `tool_ok`, or `tool_error` when the tool failed.
+fn outcome_rows(harness: &str, v: &Value, s: &mut FileState) {
+    let Some(blocks) = v["message"]["content"].as_array() else {
+        return;
+    };
+    let Some(at) = timestamp(v) else { return };
+    let session = v["sessionId"].as_str().unwrap_or("");
+    for block in blocks.iter().filter(|block| block["type"] == "tool_result") {
+        let Some(call) = block["tool_use_id"].as_str() else {
+            continue;
+        };
+        let id = format!("local:claude:result:{call}");
+        let mut r = row(&id, harness, session, &s.model, at, "outcome");
+        r["outcome"] = json!(if block["is_error"] == true { "tool_error" } else { "tool_ok" });
+        s.rows.insert(id, r);
+    }
+}
+
+/// A failed API request that Claude Code retried or gave up on.
+fn api_error_row(harness: &str, v: &Value, s: &mut FileState) {
+    let (Some(uuid), Some(at)) = (v["uuid"].as_str(), timestamp(v)) else {
+        return;
+    };
+    let error = &v["error"];
+    let outcome = if error["connection"].is_object() || error["isNetworkDown"] == true {
+        "connection_error"
+    } else if !error["rateLimits"].is_null() || error["status"] == 429 {
+        "rate_limit"
+    } else {
+        "api_error"
+    };
+    let id = format!("local:claude:api-error:{uuid}");
+    let session = v["sessionId"].as_str().unwrap_or("");
+    let mut r = row(&id, harness, session, &s.model, at, "outcome");
+    r["outcome"] = json!(outcome);
+    if let Some(code) = error["connection"]["code"].as_str().or(error["status"].as_str()) {
+        r["code"] = json!(code);
+    } else if let Some(status) = error["status"].as_u64() {
+        r["code"] = json!(status.to_string());
+    }
+    s.rows.insert(id, r);
 }
 
 fn parse_claude(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
@@ -235,6 +359,7 @@ fn parse_claude(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
     match value.get("type").and_then(Value::as_str).unwrap_or("") {
         "rate_limit_event" => {
             let info = value.get("rate_limit_info").unwrap_or(value);
+            record_limits(info);
             let mut usage = serde_json::Map::new();
             for key in [
                 "status",
@@ -401,12 +526,25 @@ async fn claude_usage() -> ProviderUsageSnapshot {
     match claude_auth().await {
         Ok(auth) => {
             cache_identity("claude", claude_identity(&auth));
+            if read_limits().is_none_or(|(at, _)| now().saturating_sub(at) > PROBE_AFTER) {
+                probe_limits().await;
+            }
+            let report = read_limits();
+            let windows = report.as_ref().map(|(_, info)| limit_windows(info)).unwrap_or_default();
+            let available = !windows.is_empty();
             ProviderUsageSnapshot { id: "claude", label: "Claude Code",
                 account_label: auth.get("email").and_then(Value::as_str).map(str::to_owned),
                 plan: auth.get("subscriptionType").or_else(|| auth.get("plan"))
                     .and_then(Value::as_str).map(str::to_owned),
-                source: "cli", status: "unavailable", fetched_at: Some(now()), windows: vec![],
-                detail: Some("Claude CLI reports sign-in status but does not expose current subscription usage here.".into()) }
+                source: "cli",
+                status: if available { "available" } else { "unavailable" },
+                fetched_at: report.map(|(at, _)| at).or(Some(now())),
+                windows,
+                detail: Some(if available {
+                    "Reported by Claude Code with each run. When it is older than 10 minutes, Noai sends one tiny Haiku request to refresh it."
+                } else {
+                    "Claude Code did not report its limits. This account may not have usage windows, or the CLI could not be reached."
+                }.into()) }
         }
         Err(_) => {
             cache_identity("claude", None);
@@ -419,10 +557,208 @@ async fn claude_usage() -> ProviderUsageSnapshot {
     }
 }
 
+/// Refresh the cached report when it is older than this, in seconds.
+const PROBE_AFTER: u64 = 10 * 60;
+
+fn limits_path() -> Option<PathBuf> {
+    crate::platform::app_data_dir()
+        .ok()
+        .map(|dir| dir.join("claude-limits.json"))
+}
+
+/// Saves the latest `rate_limit_info` (status, utilization and reset times only)
+/// so the app and the daemon share it.
+fn record_limits(info: &Value) {
+    if cfg!(test) || !info["unifiedWindows"].is_object() {
+        return;
+    }
+    let Some(path) = limits_path() else { return };
+    let mut windows = serde_json::Map::new();
+    for (key, window) in info["unifiedWindows"].as_object().into_iter().flatten() {
+        windows.insert(
+            key.clone(),
+            json!({"utilization":window["utilization"],"resetsAt":window["resetsAt"],"status":window["status"]}),
+        );
+    }
+    let saved = json!({"at":now(),"info":{"status":info["status"],"unifiedWindows":windows}});
+    let tmp = path.with_extension("tmp");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    crate::platform::restrict_new_file(&mut options);
+    let written = options
+        .open(&tmp)
+        .and_then(|mut file| file.write_all(saved.to_string().as_bytes()))
+        .and_then(|_| std::fs::rename(&tmp, &path));
+    if let Err(error) = written {
+        eprintln!("Noai Claude limits: {error}");
+    }
+}
+
+fn read_limits() -> Option<(u64, Value)> {
+    let saved: Value = serde_json::from_slice(&std::fs::read(limits_path()?).ok()?).ok()?;
+    Some((saved["at"].as_u64()?, saved["info"].clone()))
+}
+
+fn limit_windows(info: &Value) -> Vec<ProviderUsageWindow> {
+    let mut windows: Vec<_> = info["unifiedWindows"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, window)| {
+            let used = if window["status"] == "rejected" {
+                100.0
+            } else {
+                window["utilization"].as_f64()? * 100.0
+            };
+            let label = match key.as_str() {
+                "five_hour" => "5-hour limit".to_owned(),
+                "seven_day" => "Weekly limit".to_owned(),
+                other => match other.strip_prefix("seven_day_") {
+                    Some(model) => format!("Weekly · {}", capitalize(model)),
+                    None => capitalize(&other.replace('_', " ")),
+                },
+            };
+            Some(ProviderUsageWindow {
+                label,
+                unit: None,
+                used_percent: Some(used.clamp(0.0, 100.0)),
+                remaining: None,
+                limit: None,
+                resets_at: window["resetsAt"].as_u64(),
+            })
+        })
+        .collect();
+    let rank = |label: &str| match label {
+        "5-hour limit" => 0,
+        "Weekly limit" => 1,
+        _ => 2,
+    };
+    windows.sort_by(|a, b| rank(&a.label).cmp(&rank(&b.label)).then(a.label.cmp(&b.label)));
+    windows
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// Claude Code reports limits only while it runs, so ask it something tiny:
+/// Haiku, no tools, nothing saved to history.
+async fn probe_limits() {
+    static PROBING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let Ok(_guard) = PROBING.try_lock() else {
+        return;
+    };
+    let Some(binary) = find_binary("claude") else {
+        return;
+    };
+    let child = Command::new(binary)
+        .args([
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--model",
+            "haiku",
+            "--tools",
+            "",
+            "--no-session-persistence",
+        ])
+        .current_dir(std::env::temp_dir())
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else { return };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(b"Reply with OK.").await;
+    }
+    let Some(stdout) = child.stdout.take() else {
+        return;
+    };
+    let read = async {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if !line.contains("rate_limit_event") {
+                continue;
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                record_limits(&value["rate_limit_info"]);
+                return;
+            }
+        }
+    };
+    let _ = timeout(Duration::from_secs(60), read).await;
+    let _ = child.kill().await;
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn limit_report_becomes_labelled_windows() {
+        let info = json!({"status":"allowed","unifiedWindows":{
+            "seven_day":{"utilization":0.27,"resetsAt":200,"status":"allowed"},
+            "five_hour":{"utilization":0.09,"resetsAt":100,"status":"allowed"},
+            "seven_day_opus":{"utilization":0.5,"resetsAt":300,"status":"rejected"}}});
+        let windows = limit_windows(&info);
+        let labels: Vec<_> = windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["5-hour limit", "Weekly limit", "Weekly · Opus"]);
+        assert_eq!(windows[0].used_percent, Some(9.0));
+        assert_eq!(windows[0].resets_at, Some(100));
+        assert_eq!(windows[2].used_percent, Some(100.0));
+        assert!(limit_windows(&json!({"status":"allowed"})).is_empty());
+    }
+
+    #[test]
+    fn session_usage_counts_each_call_once_and_tracks_context() {
+        let mut usage = SessionUsage::default();
+        let mut line = json!({"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200,"output_tokens":5}}});
+        Claude.session_usage(&line, &mut usage);
+        line["message"]["usage"]["output_tokens"] = json!(40);
+        Claude.session_usage(&line, &mut usage);
+        assert_eq!(usage.tokens(), Tokens { input: 10, cache_read: 1000, cache_write: 200, output: 40 });
+        assert_eq!(usage.context_used, Some(1250));
+        assert_eq!(usage.context_window, Some(200_000));
+        let side = json!({"type":"assistant","isSidechain":true,"message":{"id":"m2","model":"x","usage":{"input_tokens":1,"output_tokens":1}}});
+        Claude.session_usage(&side, &mut usage);
+        assert_eq!(usage.context_used, Some(1250));
+        assert_eq!(usage.tokens().total(), 1252);
+    }
+
+    #[test]
+    fn subagent_transcripts_point_at_their_parent() {
+        let child = Path::new("/p/proj/abc/subagents/agent-1.jsonl");
+        assert_eq!(Claude.subagent_parent(child), Some(PathBuf::from("/p/proj/abc.jsonl")));
+        assert_eq!(Claude.subagent_parent(Path::new("/p/proj/abc.jsonl")), None);
+    }
+
+    #[test]
+    fn tool_results_and_api_errors_become_outcomes() {
+        let mut state = FileState::default();
+        let results = json!({"type":"user","timestamp":"2026-11-19T10:00:00Z","sessionId":"s","message":{"content":[
+            {"type":"tool_result","tool_use_id":"a","content":"ok"},
+            {"type":"tool_result","tool_use_id":"b","is_error":true,"content":"failed"}]}});
+        Claude.metrics_line(&results, &mut state);
+        let offline = json!({"type":"system","subtype":"api_error","uuid":"u1","timestamp":"2026-11-19T10:01:00Z","sessionId":"s",
+            "error":{"connection":{"code":"ENOTFOUND"},"isNetworkDown":true,"rateLimits":null}});
+        Claude.metrics_line(&offline, &mut state);
+        let server = json!({"type":"system","subtype":"api_error","uuid":"u2","timestamp":"2026-11-19T10:02:00Z","sessionId":"s",
+            "error":{"status":529,"rateLimits":null}});
+        Claude.metrics_line(&server, &mut state);
+        let outcome = |id: &str| state.rows[id]["outcome"].clone();
+        assert_eq!(outcome("local:claude:result:a"), "tool_ok");
+        assert_eq!(outcome("local:claude:result:b"), "tool_error");
+        assert_eq!(outcome("local:claude:api-error:u1"), "connection_error");
+        assert_eq!(state.rows["local:claude:api-error:u1"]["code"], "ENOTFOUND");
+        assert_eq!(outcome("local:claude:api-error:u2"), "api_error");
+        assert_eq!(state.rows["local:claude:api-error:u2"]["code"], "529");
+    }
 
     #[test]
     fn claude_aliases_come_from_the_model_option_only() {

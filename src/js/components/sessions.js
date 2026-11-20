@@ -6,6 +6,46 @@ import { renderSessionStats } from './session-stats.js';
 const $ = selector => document.querySelector(selector);
 const date = value => value ? new Date(value * 1000).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : '—';
 const PAGE_SIZE = 25;
+const compact = value => Intl.NumberFormat(undefined, {notation:'compact', maximumFractionDigits:1}).format(value);
+const full = value => value.toLocaleString();
+const sum = tokens => tokens ? (tokens.input || 0) + (tokens.cacheRead || 0) + (tokens.cacheWrite || 0) + (tokens.output || 0) : 0;
+
+/** All tokens a session used, its subagents included; null when none were recorded. */
+export function sessionTokens(session) {
+  if (!session.tokens && !session.subagents) return null;
+  const own = sum(session.tokens), subagents = sum(session.subagents?.tokens);
+  return {own, subagents, subagentCount:session.subagents?.count || 0, total:own+subagents};
+}
+
+/** How full the context window was after the latest call, 0–100; null when unknown. */
+export function contextPercent(session) {
+  const {used, window} = session.context || {};
+  return used >= 0 && window > 0 ? Math.min(100, used/window*100) : null;
+}
+
+function contextCell(session) {
+  const cell = element('td', 'session-context'), percent = contextPercent(session);
+  if (percent === null) { cell.append(element('span', 'session-none', '—')); cell.title = 'Not recorded'; return cell; }
+  const {used, window} = session.context;
+  const meter = element('span', `context-meter${percent >= 80 ? ' is-high' : ''}`), fill = element('span');
+  fill.style.width = `${percent}%`; meter.append(fill);
+  meter.setAttribute('role', 'img'); meter.setAttribute('aria-label', `Context ${percent.toFixed(0)}% full`);
+  const label = element('span', 'context-label'); label.append(meter, element('strong', '', `${percent.toFixed(0)}%`));
+  cell.append(label, element('small', '', `${compact(used)} / ${compact(window)}`));
+  cell.title = `${full(used)} of ${full(window)} tokens in context after the latest call`;
+  return cell;
+}
+
+function tokensCell(session) {
+  const cell = element('td', 'session-tokens'), tokens = sessionTokens(session);
+  if (!tokens) { cell.append(element('span', 'session-none', '—')); cell.title = 'Not recorded'; return cell; }
+  cell.append(element('strong', '', compact(tokens.total)));
+  if (tokens.subagentCount) cell.append(element('small', '', `incl. ${tokens.subagentCount} subagent${tokens.subagentCount === 1 ? '' : 's'}`));
+  const t = session.tokens || {};
+  cell.title = [`Input ${full(t.input || 0)}`, `Cache read ${full(t.cacheRead || 0)}`, `Cache write ${full(t.cacheWrite || 0)}`, `Output ${full(t.output || 0)}`,
+    ...(tokens.subagentCount ? [`Subagents ${full(tokens.subagents)}`] : []), `Total ${full(tokens.total)}`].join('\n');
+  return cell;
+}
 
 export function combineSessions(local, conversations) {
   const ids = new Set(local.map(session => `${session.harness}:${session.sessionId}`));
@@ -32,7 +72,13 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
     renderHarnessFilter();
     const query = search.value.trim().toLowerCase();
     const filtered = sessions.filter(session => (!harness.value || session.harness === harness.value) && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
-    filtered.sort((a,b) => sort.value === 'title' ? a.title.localeCompare(b.title) : sort.value === 'oldest' ? a.updatedAt-b.updatedAt : b.updatedAt-a.updatedAt);
+    const order = {
+      title:(a,b) => a.title.localeCompare(b.title),
+      oldest:(a,b) => a.updatedAt-b.updatedAt,
+      tokens:(a,b) => (sessionTokens(b)?.total ?? -1)-(sessionTokens(a)?.total ?? -1) || b.updatedAt-a.updatedAt,
+      context:(a,b) => (contextPercent(b) ?? -1)-(contextPercent(a) ?? -1) || b.updatedAt-a.updatedAt,
+    }[sort.value] || ((a,b) => b.updatedAt-a.updatedAt);
+    filtered.sort(order);
     const pages = Math.max(1, Math.ceil(filtered.length/PAGE_SIZE)); page = Math.min(page, pages-1);
     body.replaceChildren();
     for (const session of filtered.slice(page*PAGE_SIZE, (page+1)*PAGE_SIZE)) {
@@ -43,7 +89,7 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
       title.append(link, element('small', '', session.archived ? 'Archived' : session.conversation ? 'Noai' : session.sessionId));
       const project = element('td', 'session-project', session.projectPath ? basename(session.projectPath) : '—'); project.title = session.projectPath || '';
       const agent = element('td'); agent.append(element('span', '', getHarness(session.harness)?.label || session.harness), element('small', '', session.model || 'Default model'));
-      row.append(title, project, agent, element('td', 'session-count', String(session.messageCount)), element('td', 'session-date', date(session.updatedAt)));
+      row.append(title, project, agent, contextCell(session), tokensCell(session), element('td', 'session-count', String(session.messageCount)), element('td', 'session-date', date(session.updatedAt)));
       row.addEventListener('click', event => { if (!event.target.closest('a') && !window.getSelection()?.toString()) void open(session); });
       body.append(row);
     }

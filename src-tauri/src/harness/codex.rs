@@ -2,7 +2,7 @@
 
 use super::{
     config_dir, content_text, token_event, BoxFuture, Harness, HistoryRoot, Permission,
-    SessionMessage, SessionMeta, TokenKeys,
+    SessionMessage, SessionMeta, SessionUsage, TokenKeys, Tokens,
 };
 use crate::adapters::{find_binary, JobPermissions, RunEvent, RunRequest};
 use crate::local_metrics::{count, row, timestamp, FileState};
@@ -231,6 +231,38 @@ impl Harness for Codex {
         })
     }
 
+    fn session_usage(&self, v: &Value, usage: &mut SessionUsage) {
+        let info = &v["payload"]["info"];
+        if v["type"] != "event_msg" || v["payload"]["type"] != "token_count" || !info.is_object() {
+            return;
+        }
+        let total = &info["total_token_usage"];
+        if total.is_object() {
+            // Codex reports running totals; input includes cached input.
+            let input = count(total, "input_tokens");
+            let cached = count(total, "cached_input_tokens").min(input);
+            usage.calls.insert(
+                "total".into(),
+                Tokens {
+                    input: input - cached,
+                    cache_read: cached,
+                    cache_write: 0,
+                    output: count(total, "output_tokens"),
+                },
+            );
+        }
+        let last = &info["last_token_usage"];
+        if last.is_object() {
+            let used = last["total_tokens"]
+                .as_u64()
+                .unwrap_or_else(|| count(last, "input_tokens") + count(last, "output_tokens"));
+            usage.context_used = Some(used);
+        }
+        if let Some(window) = info["model_context_window"].as_u64() {
+            usage.context_window = Some(window);
+        }
+    }
+
     fn metrics_line(&self, v: &Value, s: &mut FileState) {
         let harness = self.id();
         let p = &v["payload"];
@@ -281,6 +313,35 @@ impl Harness for Codex {
         } else if v["type"] == "response_item"
             && matches!(
                 p["type"].as_str(),
+                Some("function_call_output" | "custom_tool_call_output")
+            )
+        {
+            if let Some(call) = p["call_id"].as_str() {
+                let id = format!("local:codex:{}:result:{call}", s.session);
+                let mut r = row(&id, harness, &s.session, &s.model, at, "outcome");
+                r["outcome"] = json!(if tool_failed(&p["output"]) { "tool_error" } else { "tool_ok" });
+                s.rows.insert(id, r);
+            }
+        } else if v["type"] == "event_msg" && matches!(p["type"].as_str(), Some("error" | "stream_error")) {
+            let message = p["message"].as_str().unwrap_or("").to_lowercase();
+            let outcome = if p["type"] == "stream_error"
+                || ["stream disconnected", "connection", "network", "timed out", "timeout", "dns"]
+                    .iter()
+                    .any(|word| message.contains(word))
+            {
+                "connection_error"
+            } else if ["rate limit", "usage limit", "429", "quota"].iter().any(|word| message.contains(word)) {
+                "rate_limit"
+            } else {
+                "api_error"
+            };
+            let id = format!("local:codex:{}:error:{}:{}", s.session, v["timestamp"], s.rows.len());
+            let mut r = row(&id, harness, &s.session, &s.model, at, "outcome");
+            r["outcome"] = json!(outcome);
+            s.rows.insert(id, r);
+        } else if v["type"] == "response_item"
+            && matches!(
+                p["type"].as_str(),
                 Some("function_call" | "custom_tool_call")
             )
         {
@@ -292,6 +353,22 @@ impl Harness for Codex {
             }
         }
     }
+}
+
+/// Whether a recorded tool output reports a non-zero exit code.
+fn tool_failed(output: &Value) -> bool {
+    let text = output.as_str().unwrap_or("");
+    if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+        if let Some(code) = parsed["metadata"]["exit_code"].as_i64() {
+            return code != 0;
+        }
+    }
+    let code = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Exit code: "))
+        .or_else(|| text.lines().find_map(|line| line.trim().strip_prefix("Process exited with code ")));
+    code.and_then(|code| code.trim().parse::<i64>().ok())
+        .is_some_and(|code| code != 0)
 }
 
 fn parse_codex(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
@@ -540,6 +617,37 @@ async fn codex_usage() -> ProviderUsageSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_session_usage_uses_running_totals_and_reported_window() {
+        let mut usage = SessionUsage::default();
+        let line = json!({"type":"event_msg","payload":{"type":"token_count","info":{
+            "total_token_usage":{"input_tokens":5000,"cached_input_tokens":3000,"output_tokens":400},
+            "last_token_usage":{"input_tokens":2000,"output_tokens":100,"total_tokens":2100},
+            "model_context_window":272000}}});
+        Codex.session_usage(&line, &mut usage);
+        Codex.session_usage(&line, &mut usage);
+        assert_eq!(usage.tokens(), Tokens { input: 2000, cache_read: 3000, cache_write: 0, output: 400 });
+        assert_eq!((usage.context_used, usage.context_window), (Some(2100), Some(272000)));
+    }
+
+    #[test]
+    fn codex_tool_exit_codes_and_errors_become_outcomes() {
+        assert!(tool_failed(&json!("Exit code: 1\nWall time: 0.2 seconds")));
+        assert!(!tool_failed(&json!("Exit code: 0\nOutput:")));
+        assert!(tool_failed(&json!("{\"output\":\"x\",\"metadata\":{\"exit_code\":2}}")));
+        assert!(!tool_failed(&json!("Success. Updated files")));
+        let mut state = FileState::default();
+        state.session = "s".into();
+        let at = "2026-11-19T10:00:00Z";
+        Codex.metrics_line(&json!({"type":"response_item","timestamp":at,"payload":{"type":"function_call_output","call_id":"c1","output":"Exit code: 127"}}), &mut state);
+        Codex.metrics_line(&json!({"type":"event_msg","timestamp":at,"payload":{"type":"stream_error","message":"Reconnecting... 1/5"}}), &mut state);
+        Codex.metrics_line(&json!({"type":"event_msg","timestamp":at,"payload":{"type":"error","message":"You've hit your usage limit."}}), &mut state);
+        let outcomes: Vec<_> = state.rows.values().map(|r| r["outcome"].as_str().unwrap().to_owned()).collect();
+        assert!(outcomes.contains(&"tool_error".into()));
+        assert!(outcomes.contains(&"connection_error".into()));
+        assert!(outcomes.contains(&"rate_limit".into()));
+    }
     use crate::providers::account_fingerprint;
 
     #[test]

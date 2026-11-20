@@ -51,7 +51,7 @@ export function renderAccounts(container, runtime, native, snapshots = [], manua
     card.append(element('p', 'usage-empty', snapshot?.detail || (native ? 'This provider does not expose usage through a connected adapter.' : 'Open the desktop app to check this account.')));
     const footer = element('div', 'account-footer');
     footer.append(element('span', 'source-label', `${snapshot?.source || 'unavailable'}${snapshot?.fetchedAt ? ` · Checked ${timeLabel(snapshot.fetchedAt * 1000)}` : ''}`));
-    const planButton = element('button', 'plan-button', manual ? 'Edit plan label' : 'Set plan label');
+    const planButton = element('button', 'secondary-button plan-button', manual ? 'Edit plan label' : 'Set plan label');
     planButton.type = 'button';
     planButton.addEventListener('click', () => editPlan(provider.id, provider.label));
     footer.append(planButton);

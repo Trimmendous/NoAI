@@ -6,7 +6,8 @@
 }
 
 @media (max-width: 720px) {
-  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(280px, calc(100vw - 42px)); height: 100dvh; transform: translateX(-100%); transition: transform .18s ease; box-shadow: 12px 0 30px var(--shadow); }
+  .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(280px, calc(100vw - 42px)); height: 100dvh; transform: translateX(-100%); transition: transform .18s ease; }
+  body.sidebar-open .sidebar { box-shadow: 12px 0 30px var(--shadow-strong); }
   body.sidebar-open .sidebar { transform: translateX(0); }
   body.sidebar-open::before { position: fixed; z-index: 25; inset: 0; background: var(--overlay); content: ''; }
   .sidebar-close, .mobile-menu { display: inline-grid; }

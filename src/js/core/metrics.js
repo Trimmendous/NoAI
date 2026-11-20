@@ -55,6 +55,14 @@ export function recordedCost(row) {
   return cost?.kind === 'recorded' && cost.scope === 'turn' && cost.currency === 'USD'
     && Number.isFinite(cost.amount) && cost.amount >= 0 ? cost.amount : null;
 }
+// Outcome rows recorded from agent transcripts, by the field they count into.
+const OUTCOME_KEYS = {tool_ok:'toolOk', tool_error:'toolError', connection_error:'connection', rate_limit:'rateLimit', api_error:'apiError'};
+const emptyOutcomes = () => ({responses:0,toolOk:0,toolError:0,connection:0,rateLimit:0,apiError:0});
+/** Successful calls (model responses + tool calls that worked) and each kind of failure. */
+export function outcomeTotals(counts) {
+  const ok=counts.responses+counts.toolOk, errors=counts.toolError+counts.connection+counts.rateLimit+counts.apiError;
+  return {ok,errors,rate:ok+errors ? ok/(ok+errors) : null};
+}
 export function summarizeMetrics(rows, {harness='',model='',range='7d'} = {}, now = Date.now()/1000) {
   const matches = row => (!harness || row.harness===harness) && (!model || (row.model || '__default__')===model);
   const eligible = rows.filter(row => Number.isFinite(row.at) && row.at > 0 && row.at <= now && matches(row));
@@ -69,13 +77,14 @@ export function summarizeMetrics(rows, {harness='',model='',range='7d'} = {}, no
   const startDate = new Date(from*1000);
   if(step===3600) startDate.setMinutes(0,0,0); else startDate.setHours(0,0,0,0);
   const points=[];
-  const empty = at => ({at,total:0,input:0,uncached:0,output:0,cached:0,tools:0,cost:0,costReports:0,usageReports:0});
+  const empty = at => ({at,total:0,input:0,uncached:0,output:0,cached:0,tools:0,cost:0,costReports:0,usageReports:0,...emptyOutcomes()});
   while(startDate.getTime()/1000<=now) {
     points.push(empty(startDate.getTime()/1000));
     if(step===3600) startDate.setTime(startDate.getTime()+3600000); else startDate.setDate(startDate.getDate()+bucketDays);
   }
   const runs=new Set(), completed=new Set(), failed=new Set(), toolNames=new Map(), groups=new Map(), daily=new Map(), harnesses=new Map(), models=new Map();
   let input=0,output=0,cached=0,toolCount=0,usageReports=0,baselineOnly=0,cost=0,costReports=0,costTokens=0;
+  const outcomes=emptyOutcomes();
   for(const row of filtered) {
     runs.add(`${row.harness}:${row.sessionId || row.runId}`);
     if(row.type==='done' && !row.cancelled) completed.add(row.runId);
@@ -93,6 +102,7 @@ export function summarizeMetrics(rows, {harness='',model='',range='7d'} = {}, no
       const parts=tokenParts(row), total=row.inputTokens+row.outputTokens, amount=recordedCost(row);
       usageReports++;input+=row.inputTokens;output+=row.outputTokens;cached+=parts.cached;
       if(amount!==null){cost+=amount;costReports++;costTokens+=total;}
+      outcomes.responses++;point.responses++;
       for(const bucket of [point,dayRow]) {
         bucket.input+=row.inputTokens;bucket.total+=total;bucket.usageReports++;
         for(const name of ['uncached','cached','output'])bucket[name]+=parts[name];
@@ -103,13 +113,15 @@ export function summarizeMetrics(rows, {harness='',model='',range='7d'} = {}, no
       const name=row.model || 'Not reported';models.set(name,(models.get(name)||0)+total);
     }
     if(row.baselineOnly)baselineOnly++;
+    const outcome=OUTCOME_KEYS[row.type==='outcome' ? row.outcome : ''];
+    if(outcome){outcomes[outcome]++;point[outcome]++;}
     if(row.type==='activity') {
       toolCount++;point.tools++;group.tools++;dayRow.tools++;
       const name=row.tool || 'Unnamed tool';toolNames.set(name,(toolNames.get(name)||0)+1);
     }
   }
   const shares = map => [...map].map(([name,tokens])=>({name,tokens})).sort((a,b)=>b.tokens-a.tokens);
-  return {points,daily:[...daily.values()].sort((a,b)=>b.at-a.at),from,step,input,output,cached,tokens:input+output,toolCount,usageReports,baselineOnly,runs:runs.size,completed:completed.size,failed:failed.size,
+  return {points,outcomes,daily:[...daily.values()].sort((a,b)=>b.at-a.at),from,step,input,output,cached,tokens:input+output,toolCount,usageReports,baselineOnly,runs:runs.size,completed:completed.size,failed:failed.size,
     cost:costReports?cost:null,costReports,costTokens,costCoverage:usageReports?costReports/usageReports:null,
     comparison:previous===null?null:comparePeriod(input+output,previous),previous,
     harnesses:shares(harnesses),models:shares(models),cacheRate:input?cached/input:null,

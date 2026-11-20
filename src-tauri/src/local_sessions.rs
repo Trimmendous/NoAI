@@ -74,6 +74,7 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
     let mut summary = json!({"id":path.to_string_lossy(),"sessionId":path.file_stem().unwrap_or_default().to_string_lossy(),"harness":harness,"title":"Untitled session","projectPath":"","model":"","updatedAt":updated,"startedAt":null,"archived":archived,"messageCount":0,"sourcePath":path.to_string_lossy()});
     let mut count = 0;
     let mut parse_errors = 0;
+    let mut usage = crate::harness::SessionUsage::default();
     for line in BufReader::new(file).lines() {
         let line = line.map_err(|error| error.to_string())?;
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -86,6 +87,7 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
             }
         }
         if let Some(agent) = crate::harness::get(harness) {
+            agent.session_usage(&value, &mut usage);
             let meta = agent.session_meta(&value);
             if let Some(id) = meta.session_id {
                 summary["sessionId"] = json!(id);
@@ -117,6 +119,12 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
     }
     summary["messageCount"] = json!(count);
     summary["parseErrors"] = json!(parse_errors);
+    if !usage.calls.is_empty() {
+        summary["tokens"] = json!(usage.tokens());
+    }
+    if let (Some(used), Some(window)) = (usage.context_used, usage.context_window) {
+        summary["context"] = json!({"used":used,"window":window});
+    }
     Ok(summary)
 }
 fn list(home: PathBuf) -> Result<Value, String> {
@@ -172,8 +180,41 @@ fn list(home: PathBuf) -> Result<Value, String> {
     }
     *index = next;
     Ok(
-        json!({"sessions":index.values().map(|entry| entry.summary.clone()).collect::<Vec<_>>(),"errors":errors,"parseErrors":index.values().map(|entry| entry.summary["parseErrors"].as_u64().unwrap_or(0)).sum::<u64>()}),
+        json!({"sessions":with_subagents(&index),"errors":errors,"parseErrors":index.values().map(|entry| entry.summary["parseErrors"].as_u64().unwrap_or(0)).sum::<u64>()}),
     )
+}
+/// Lists sessions with each subagent transcript folded into its parent: the
+/// parent's `subagents` holds their count and summed tokens, and the subagents
+/// are not listed on their own.
+fn with_subagents(index: &BTreeMap<String, Entry>) -> Vec<Value> {
+    let mut children: BTreeMap<String, (u64, crate::harness::Tokens)> = BTreeMap::new();
+    let mut hidden = std::collections::HashSet::new();
+    for (id, entry) in index {
+        let Some(parent) = crate::harness::get(&entry.harness)
+            .and_then(|agent| agent.subagent_parent(&entry.path))
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .filter(|parent| index.contains_key(parent))
+        else {
+            continue;
+        };
+        let tokens: crate::harness::Tokens =
+            serde_json::from_value(entry.summary["tokens"].clone()).unwrap_or_default();
+        let child = children.entry(parent).or_default();
+        child.0 += 1;
+        child.1 = child.1.add(tokens);
+        hidden.insert(id.clone());
+    }
+    index
+        .iter()
+        .filter(|(id, _)| !hidden.contains(*id))
+        .map(|(id, entry)| {
+            let mut summary = entry.summary.clone();
+            if let Some((count, tokens)) = children.get(id) {
+                summary["subagents"] = json!({"count":count,"tokens":tokens});
+            }
+            summary
+        })
+        .collect()
 }
 fn detail(id: String, offset: usize) -> Result<Value, String> {
     let entry = INDEX
@@ -314,6 +355,31 @@ mod tests {
         assert_eq!(last["messages"].as_array().unwrap().len(), 2);
         assert!(last["nextOffset"].is_null());
         INDEX.get().unwrap().lock().unwrap().remove(&id);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn subagent_sessions_fold_into_their_parent() {
+        let dir = std::env::temp_dir().join(format!("noai-subagents-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(dir.join("abc/subagents")).unwrap();
+        let call = |id: &str, input: u64| json!({"type":"assistant","sessionId":"abc","message":{"id":id,"model":"m","role":"assistant","content":"hi","usage":{"input_tokens":input,"output_tokens":1}}}).to_string() + "\n";
+        let parent = dir.join("abc.jsonl");
+        let child = dir.join("abc/subagents/agent-1.jsonl");
+        fs::write(&parent, call("p", 100)).unwrap();
+        fs::write(&child, call("c", 50)).unwrap();
+        let mut index = BTreeMap::new();
+        for path in [&parent, &child] {
+            let summary = summarize(path, "claude", false, 1).unwrap();
+            index.insert(
+                path.to_string_lossy().into_owned(),
+                Entry { path: path.clone(), harness: "claude".into(), len: 0, modified: SystemTime::UNIX_EPOCH, summary },
+            );
+        }
+        let sessions = with_subagents(&index);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["tokens"]["input"], 100);
+        assert_eq!(sessions[0]["context"]["used"], 101);
+        assert_eq!(sessions[0]["subagents"]["count"], 1);
+        assert_eq!(sessions[0]["subagents"]["tokens"]["input"], 50);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

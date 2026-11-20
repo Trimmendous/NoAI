@@ -1,4 +1,5 @@
 import { renderUsageChart } from './usage-chart.js';
+import { renderOutcomesChart } from './outcomes-chart.js';
 import { element } from './dom.js';
 import { normalizeMetrics, summarizeMetrics, summarizeJobRuns } from '../core/metrics.js';
 import { getHarness } from '../core/catalog.js';
@@ -30,6 +31,7 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
       ['Active sessions / runs',number(report.runs),'Unique provider sessions; unlinked Noai runs counted separately']
     ]) {const card=element('div','metrics-stat');card.append(element('span','metric-label',label),element('strong','metrics-stat-value',value),element('small','',note));cards.append(card);}
     renderUsageChart($('#metrics-chart'),report,{metric:metric.value,style:style.value});
+    renderOutcomesChart($('#metrics-outcomes'),report);
     const insights=$('#metrics-insights');insights.replaceChildren();
     for(const [label,group] of [['Most-used model',report.models[0]],['Most-used harness',report.harnesses[0]]]) {
       const card=element('div','insight-card');

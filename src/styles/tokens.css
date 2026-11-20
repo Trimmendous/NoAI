@@ -1,100 +1,133 @@
+/* Design tokens. Apple-inspired: neutral greys, white grouped cards on a soft
+   backdrop, hairline separators, one accent colour. Every other file reads
+   colours, radii and shadows from here. */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 980px;
+  --ease: cubic-bezier(.25, .1, .25, 1);
+  --palette-graphite: #8e8e93;
+}
+
 :root,
 :root[data-theme='light'] {
   color-scheme: light;
-  --canvas: #f7f6f2;
-  --surface: #fffefa;
-  --surface-subtle: #f1f0eb;
-  --surface-hover: #eae9e2;
-  --surface-selected: #e7ece6;
-  --ink: #262c28;
-  --ink-soft: #545c56;
-  --ink-muted: #626b64;
-  --line: #e4e5df;
-  --line-strong: #d2d7d0;
-  --accent: #4c7054;
-  --accent-hover: #4c7054;
-  --accent-soft: #e4eee4;
-  --accent-ink: #fafff9;
-  --warning: #85532c;
-  --error: #a54c49;
-  --success: #3f7051;
-  --shadow: rgba(42, 50, 42, 0.1);
-  --shadow-strong: rgba(28, 35, 28, 0.2);
-  --overlay: rgba(24, 30, 25, 0.42);
-  --focus: #5e8065;
-  --palette-sage: #5e8065;
-  --palette-blue: #426e91;
-  --palette-amber: #885e2d;
+  --canvas: #f5f5f7;
+  --surface: #ffffff;
+  --surface-subtle: #f2f2f5;
+  --surface-hover: #e9e9ee;
+  --surface-selected: #e3ebe5;
+  --sidebar: rgba(236, 236, 240, 0.92);
+  --topbar: rgba(255, 255, 255, 0.78);
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-hover: rgba(118, 118, 128, 0.18);
+  --ink: #1d1d1f;
+  --ink-soft: #48484c;
+  --ink-muted: #6e6e73;
+  --line: #e5e5ea;
+  --line-strong: #d2d2d7;
+  --accent: #3e7350;
+  --accent-hover: #346445;
+  --accent-soft: #e3ede5;
+  --accent-ink: #ffffff;
+  --warning: #b25000;
+  --error: #d70015;
+  --success: #248a3d;
+  --shadow: rgba(0, 0, 0, 0.06);
+  --shadow-strong: rgba(0, 0, 0, 0.18);
+  --card-shadow: 0 0 0 .5px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --raised-shadow: 0 0 0 .5px rgba(0, 0, 0, 0.08), 0 8px 28px rgba(0, 0, 0, 0.08);
+  --overlay: rgba(0, 0, 0, 0.32);
+  --focus: rgba(62, 115, 80, 0.45);
+  --palette-sage: #3e7350;
+  --palette-blue: #007aff;
+  --palette-amber: #c26a00;
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --canvas: #0e0e0f;
-  --surface: #171718;
-  --surface-subtle: #1c1c1e;
-  --surface-hover: #272729;
-  --surface-selected: #2b2b2e;
-  --ink: #ededee;
-  --ink-soft: #b7b7bc;
-  --ink-muted: #a0a0a8;
-  --line: #2c2c30;
-  --line-strong: #44444a;
+  --canvas: #111112;
+  --surface: #1c1c1e;
+  --surface-subtle: #232325;
+  --surface-hover: #2c2c2e;
+  --surface-selected: #2a3a2e;
+  --sidebar: rgba(28, 28, 30, 0.92);
+  --topbar: rgba(17, 17, 18, 0.78);
+  --fill: rgba(118, 118, 128, 0.24);
+  --fill-hover: rgba(118, 118, 128, 0.32);
+  --ink: #f5f5f7;
+  --ink-soft: #c7c7cc;
+  --ink-muted: #98989d;
+  --line: #2f2f32;
+  --line-strong: #444448;
   --accent: #91b79a;
   --accent-hover: #a5c6aa;
-  --accent-soft: #2a4230;
-  --accent-ink: #122017;
-  --warning: #d3a475;
-  --error: #dc8c83;
-  --success: #94c1a3;
-  --shadow: rgba(0, 0, 0, 0.18);
-  --shadow-strong: rgba(0, 0, 0, 0.38);
-  --overlay: rgba(0, 0, 0, 0.7);
-  --focus: #a3c9aa;
+  --accent-soft: #263a2c;
+  --accent-ink: #0f1a12;
+  --warning: #ff9f0a;
+  --error: #ff6961;
+  --success: #30d158;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --shadow-strong: rgba(0, 0, 0, 0.55);
+  --card-shadow: 0 0 0 .5px rgba(255, 255, 255, 0.07);
+  --raised-shadow: 0 0 0 .5px rgba(255, 255, 255, 0.1), 0 12px 36px rgba(0, 0, 0, 0.5);
+  --overlay: rgba(0, 0, 0, 0.55);
+  --focus: rgba(145, 183, 154, 0.55);
   --palette-sage: #91b79a;
-  --palette-blue: #8db7d8;
-  --palette-amber: #d6ad73;
+  --palette-blue: #0a84ff;
+  --palette-amber: #ffb340;
 }
 
 :root[data-palette='blue'] {
-  --accent: var(--palette-blue);
-  --accent-hover: #426e91;
-  --accent-soft: #e4ecf2;
-  --surface-selected: #e7edf1;
-  --focus: var(--palette-blue);
+  --accent: #007aff;
+  --accent-hover: #0068d9;
+  --accent-soft: #e5f0ff;
+  --accent-ink: #ffffff;
+  --surface-selected: #e3eefc;
+  --focus: rgba(0, 122, 255, 0.4);
 }
 :root[data-theme='dark'][data-palette='blue'] {
-  --accent-hover: #a7cbe4;
-  --accent-soft: #263e4f;
-  --surface-selected: #273f4e;
-  --accent-ink: #14232d;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --accent-soft: #10294a;
+  --accent-ink: #ffffff;
+  --surface-selected: #16304f;
+  --focus: rgba(10, 132, 255, 0.55);
 }
 :root[data-palette='amber'] {
-  --accent: var(--palette-amber);
-  --accent-hover: #926137;
-  --accent-soft: #f3eadb;
-  --surface-selected: #f1eadd;
-  --focus: var(--palette-amber);
+  --accent: #c26a00;
+  --accent-hover: #a85b00;
+  --accent-soft: #fbefdf;
+  --accent-ink: #ffffff;
+  --surface-selected: #f6eadb;
+  --focus: rgba(194, 106, 0, 0.4);
 }
 :root[data-theme='dark'][data-palette='amber'] {
-  --accent-hover: #e8c393;
-  --accent-soft: #493927;
-  --surface-selected: #443728;
-  --accent-ink: #2c2014;
+  --accent: #ffb340;
+  --accent-hover: #ffc46b;
+  --accent-soft: #3d2c14;
+  --accent-ink: #241703;
+  --surface-selected: #3a2b17;
+  --focus: rgba(255, 179, 64, 0.5);
 }
-
 :root[data-palette='graphite'] {
-  --accent: #55555d;
-  --accent-hover: #3d3d44;
-  --accent-soft: #e8e8eb;
-  --surface-selected: #e8e8eb;
-  --focus: #656570;
+  --accent: #48484c;
+  --accent-hover: #2c2c2e;
+  --accent-soft: #ebebef;
+  --accent-ink: #ffffff;
+  --surface-selected: #e6e6ea;
+  --focus: rgba(72, 72, 76, 0.35);
 }
 :root[data-theme='dark'][data-palette='graphite'] {
-  --accent: #d2d2d8;
-  --accent-hover: #ededf0;
-  --accent-soft: #29292d;
-  --surface-selected: #29292d;
-  --accent-ink: #141416;
-  --focus: #bdbdc7;
+  --accent: #d1d1d6;
+  --accent-hover: #ebebf0;
+  --accent-soft: #2c2c2e;
+  --accent-ink: #1c1c1e;
+  --surface-selected: #323235;
+  --focus: rgba(209, 209, 214, 0.45);
 }
-:root { --palette-graphite: #92929b; }

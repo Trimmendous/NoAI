@@ -13,6 +13,7 @@ use crate::providers::{HarnessModel, ProviderUsageSnapshot};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
@@ -47,6 +48,55 @@ pub struct SessionMessage {
     pub role: String,
     pub text: String,
     pub activities: Vec<Value>,
+}
+
+/// Token counts of one model call. `input` excludes cache reads and writes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Tokens {
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub output: u64,
+}
+
+impl Tokens {
+    pub fn total(&self) -> u64 {
+        self.input + self.cache_read + self.cache_write + self.output
+    }
+    /// Field-wise maximum: transcripts can repeat one call with growing counts.
+    pub fn max(self, other: Tokens) -> Tokens {
+        Tokens {
+            input: self.input.max(other.input),
+            cache_read: self.cache_read.max(other.cache_read),
+            cache_write: self.cache_write.max(other.cache_write),
+            output: self.output.max(other.output),
+        }
+    }
+    pub fn add(self, other: Tokens) -> Tokens {
+        Tokens {
+            input: self.input + other.input,
+            cache_read: self.cache_read + other.cache_read,
+            cache_write: self.cache_write + other.cache_write,
+            output: self.output + other.output,
+        }
+    }
+}
+
+/// Token use and context fill read from one transcript file.
+#[derive(Default)]
+pub struct SessionUsage {
+    /// Calls keyed by the agent's own call id, so repeated lines count once.
+    pub calls: HashMap<String, Tokens>,
+    /// Tokens in the context window after the latest main-thread call.
+    pub context_used: Option<u64>,
+    pub context_window: Option<u64>,
+}
+
+impl SessionUsage {
+    pub fn tokens(&self) -> Tokens {
+        self.calls.values().fold(Tokens::default(), |sum, call| sum.add(*call))
+    }
 }
 
 pub trait Harness: Send + Sync {
@@ -90,8 +140,14 @@ pub trait Harness: Send + Sync {
     fn session_message(&self, _line: &Value) -> Option<SessionMessage> {
         None
     }
-    /// Adds usage and tool rows from one transcript line to the metrics state.
+    /// Adds usage, tool and outcome rows from one transcript line to the metrics state.
     fn metrics_line(&self, _line: &Value, _state: &mut FileState) {}
+    /// Adds one transcript line's token use and context fill to a session total.
+    fn session_usage(&self, _line: &Value, _usage: &mut SessionUsage) {}
+    /// The parent session's transcript when `path` is a subagent's transcript.
+    fn subagent_parent(&self, _path: &Path) -> Option<PathBuf> {
+        None
+    }
 }
 
 static ALL: &[&dyn Harness] = &[&codex::Codex, &claude::Claude];

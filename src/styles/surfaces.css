@@ -1,55 +1,58 @@
-/* Shared section surfaces keep related content together without boxing labels. */
-.metrics-controls, .sessions-toolbar, .metrics-insights,
-.metrics-tools-section, .metrics-daily-section, .session-stats,
-.job-overview, .job-technical, #session-transcript, .job-conversation-stream {
-  border: 1px solid var(--line);
-  border-radius: 16px;
+/* One card style for the whole app: white, rounded, a hairline instead of a
+   border, and no heavy shadow. Toolbars sit directly on the backdrop. */
+.metrics-insights, .metrics-tools-section, .metrics-daily-section, .session-stats,
+.job-overview, .job-technical, #session-transcript, .job-conversation-stream,
+.metrics-stat, .metrics-figure, .scheduled-card, .scheduled-form, .sessions-table-wrap,
+.account-card, .activity-item, .resume-card, .digest-output, .job-prompt, .job-guide,
+.content-placeholder, .empty-state {
+  border: 0;
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  padding: 22px;
+  box-shadow: var(--card-shadow);
 }
-.metrics-controls, .sessions-toolbar { background: var(--surface-subtle); gap: 14px; }
+.metrics-insights, .metrics-tools-section, .metrics-daily-section, .job-overview,
+.job-technical, #session-transcript, .job-conversation-stream { padding: 22px; }
+
+/* Toolbars and filters: no box, just controls in a row. */
+.metrics-controls, .sessions-toolbar { gap: 12px; padding: 0; border: 0; background: transparent; }
+
 .metrics-insights { gap: 24px; }
 .insight-card { border: 0; padding: 0; }
 .insight-card + .insight-card { border-left: 1px solid var(--line); padding-left: 24px; }
-.metrics-stat, .metrics-figure, .scheduled-card, .sessions-table-wrap,
-.session-stats, .job-overview { box-shadow: 0 2px 6px var(--shadow); }
-#scheduled-list > .scheduled-group { padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-subtle); }
-.scheduled-card { border-radius: 12px; }
-.scheduled-card-actions .secondary-button { color: var(--accent); font-size: 12px; font-weight: 600; }
+#scheduled-list > .scheduled-group { padding: 0; border: 0; background: transparent; }
+.scheduled-card-actions .secondary-button { color: var(--accent); font-size: 13px; font-weight: 500; }
 .scheduled-card-subtitle, .scheduled-card-meta, .scheduled-card-instructions { font-size: 12px; }
-.session-stats { margin: 22px 0; }
+.session-stats { margin: 22px 0; padding: 20px 22px; }
 .session-stats > .session-stats-grid { padding: 0; }
 .session-stats-grid > div { min-width: 0; }
 .session-stats-more { margin-top: 18px; border-bottom: 0; padding-bottom: 0; }
 .job-overview > div { border: 0; padding: 0; }
-.job-run-picker { padding: 16px 20px; border-radius: 12px; background: var(--surface-subtle); }
+.job-run-picker { padding: 16px 20px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--card-shadow); }
 .job-technical > summary { padding: 0; }
-.job-detail-actions .primary-button { min-height: 42px; padding: 10px 20px; }
-.job-conversation-stream, #session-transcript { background: var(--surface-subtle); gap: 22px; }
-.job-message { border: 1px solid var(--line); background: var(--surface); box-shadow: 0 2px 4px var(--shadow); }
-.job-message.is-user { border-color: transparent; }
+.job-detail-actions .primary-button { min-height: 36px; padding: 8px 20px; }
+.job-conversation-stream, #session-transcript { gap: 18px; }
+.job-message { box-shadow: none; }
 .job-message details[open] summary { margin-bottom: 12px; }
-.conversation-context { margin: 0; align-self: center; text-align: center; color: var(--ink-soft); font-size: 12px; }
-.session-detail-nav { background: var(--canvas); }
-.session-detail-nav button { min-height: 40px; }
-.job-guide { padding: 18px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); line-height: 1.6; }
+.conversation-context { margin: 0; align-self: center; text-align: center; color: var(--ink-muted); font-size: 12px; }
+.session-detail-nav button { min-height: 32px; }
+.job-guide { padding: 18px 20px; margin-bottom: 20px; color: var(--ink); line-height: 1.55; }
 .job-guide summary { cursor: pointer; font-weight: 600; }
-.job-guide summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
 .job-guide li + li { margin-top: 12px; }
-.job-guide pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: var(--surface-subtle); border-radius: 8px; }
+.job-guide pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px 14px; background: var(--surface-subtle); border-radius: var(--radius-sm); font-family: var(--font-mono); }
 .job-guide code { overflow-wrap: anywhere; }
 @media (max-width: 720px) {
-  .metrics-controls, .sessions-toolbar, .metrics-insights, .metrics-tools-section,
-  .metrics-daily-section, .session-stats, .job-overview, .job-technical,
-  #session-transcript, .job-conversation-stream, #scheduled-list > .scheduled-group { padding: 16px; border-radius: 12px; }
+  .metrics-insights, .metrics-tools-section, .metrics-daily-section, .session-stats,
+  .job-overview, .job-technical, #session-transcript, .job-conversation-stream { padding: 16px; border-radius: var(--radius-md); }
   .insight-card + .insight-card { border-left: 0; border-top: 1px solid var(--line); padding: 18px 0 0; }
   #scheduled-list { gap: 20px; }
   .job-message { min-width: 0; max-width: 100%; padding: 14px; }
 }
 
-.job-practice { margin-top: 16px; padding: 18px; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 8px; }
+.job-practice { margin-top: 16px; padding: 18px 20px; background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--card-shadow); }
 .job-practice-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.job-practice h3:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
-.job-guide-inputs { min-width: 0; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.job-guide-inputs { min-width: 0; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-md); }
 .job-guide-inputs label { display: grid; gap: 6px; margin: 10px 0; }
 .job-guide-inputs input, .job-guide-inputs textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* A placeholder inside a card should not draw a second card. */
+.digest-output .content-placeholder, .metrics-figure .content-placeholder, .session-stats .content-placeholder { padding: 24px 0; box-shadow: none; background: transparent; }

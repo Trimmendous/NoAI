@@ -22,7 +22,7 @@ try {
   assert.equal(await page.locator('html').getAttribute('data-palette'), 'blue');
   await page.locator('input[name="theme"][value="dark"]').check();
   await page.locator('#settings-close').click();
-  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()), '#0e0e0f');
+  assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()), '#111112');
   await page.screenshot({ path: '/tmp/noai-check/dark.png', fullPage: true });
   await page.waitForTimeout(350);
   await page.reload();
