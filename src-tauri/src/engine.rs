@@ -305,12 +305,14 @@ pub fn get_digest(engine: Arc<Engine>) -> serde_json::Value {
     serde_json::json!({
         "task": engine.scheduled_tasks.digest(),
         "runs": engine.scheduled_tasks.digest_runs(30),
+        "instructions": engine.scheduled_tasks.digest().and_then(|task| crate::digest::custom_instructions(&task.prompt).map(str::to_owned)),
     })
 }
 
 pub fn set_digest(engine: Arc<Engine>, input: DigestInput) -> Result<Task, String> {
     let folder = engine.home.join(".noai").join("digest");
-    std::fs::create_dir_all(&folder).map_err(|error| format!("Cannot create digest folder: {error}"))?;
+    std::fs::create_dir_all(&folder)
+        .map_err(|error| format!("Cannot create digest folder: {error}"))?;
     let project = folder.canonicalize().map_err(|error| error.to_string())?;
     let task = engine
         .scheduled_tasks
@@ -347,6 +349,19 @@ pub fn set_scheduled_task_auto_resume(
     enabled: bool,
 ) -> Result<Task, String> {
     let task = engine.scheduled_tasks.set_auto_resume(&id, enabled)?;
+    engine.emit_task(task.clone());
+    Ok(task)
+}
+
+pub fn pause_scheduled_task(engine: Arc<Engine>, id: String) -> Result<Task, String> {
+    let _guard = engine.launch_gate.0.lock().unwrap();
+    let task = engine.scheduled_tasks.pause(&id)?;
+    engine.emit_task(task.clone());
+    Ok(task)
+}
+
+pub fn resume_scheduled_task(engine: Arc<Engine>, id: String) -> Result<Task, String> {
+    let task = engine.scheduled_tasks.resume(&id)?;
     engine.emit_task(task.clone());
     Ok(task)
 }
@@ -979,7 +994,12 @@ async fn run_scheduled_due(engine: &Arc<Engine>) {
             && request.resume_id.is_none()
         {
             // Built from live data at launch, so a delayed digest is never stale.
-            request.prompt = crate::digest::compose(&engine.scheduled_tasks, scheduler::now_epoch());
+            request.prompt = crate::digest::compose(
+                &engine.scheduled_tasks,
+                &task.prompt,
+                &engine.home,
+                scheduler::now_epoch(),
+            );
         }
         engine.emit_task(task);
         let fingerprint = if request.auto_resume {

@@ -1,8 +1,10 @@
 import { element } from './dom.js';
 import { outcomeTotals } from '../core/metrics.js';
 
-// Errors are a sliver of all calls, so they get their own panel and scale
-// instead of disappearing on top of the successful-call bars.
+// One stacked column per time bucket: successful calls at the base, errors
+// stacked on top. Errors are often a sliver, so any non-zero error segment is
+// drawn at least MIN_SEGMENT px tall; exact counts are in the tooltip and table.
+const MIN_SEGMENT = 3;
 const ERRORS = [
   ['toolError', 'Tool failed', 'outcome-tool'],
   ['connection', 'Connection', 'outcome-connection'],
@@ -56,38 +58,36 @@ export function renderOutcomesChart(container, report) {
   container.append(stats, legend);
 
   const points = report.points;
-  const w = 760, left = 56, right = 16, plot = 104, top1 = 30, top2 = top1 + plot + 52, h = top2 + plot + 34, inner = w - left - right;
+  const w = 760, left = 56, right = 16, top = 16, plot = 220, h = top + plot + 34, inner = w - left - right;
   const band = inner/points.length, width = Math.max(1, band*.72);
   const x = i => left + i*band + (band-width)/2;
-  const okMax = niceMax(Math.max(...points.map(point => point.responses + point.toolOk)));
-  const errMax = niceMax(Math.max(...points.map(point => ERRORS.reduce((sum, [key]) => sum + errorValue(point, key), 0))));
-  const svg = svgNode('svg', {viewBox:`0 0 ${w} ${h}`, class:'metrics-chart outcomes-chart', role:'group', 'aria-label':'Successful calls and errors over time'});
-  for (const [title, top, max] of [['Successful calls', top1, okMax], [summary.errors ? 'Errors' : 'Errors · none in this period', top2, errMax]]) {
-    svg.append(svgNode('text', {x:0, y:top-16, class:'chart-panel-title'}, title));
-    for (const tick of [0, max/2, max]) {
-      if (max <= 1 && tick === max/2) continue;
-      const y = top + plot - tick/max*plot;
-      svg.append(svgNode('line', {x1:left, x2:w-right, y1:y, y2:y, class:tick ? 'chart-grid' : 'chart-axis'}),
-        svgNode('text', {x:left-8, y:y+4, 'text-anchor':'end', class:'chart-label'}, compact(tick)));
-    }
+  const total = point => point.responses + point.toolOk + ERRORS.reduce((sum, [key]) => sum + errorValue(point, key), 0);
+  const max = niceMax(Math.max(...points.map(total)));
+  const svg = svgNode('svg', {viewBox:`0 0 ${w} ${h}`, class:'metrics-chart outcomes-chart', role:'group', 'aria-label':'Successful calls with errors stacked on top, over time'});
+  for (const tick of [0, max/2, max]) {
+    if (max <= 1 && tick === max/2) continue;
+    const y = top + plot - tick/max*plot;
+    svg.append(svgNode('line', {x1:left, x2:w-right, y1:y, y2:y, class:tick ? 'chart-grid' : 'chart-axis'}),
+      svgNode('text', {x:left-8, y:y+4, 'text-anchor':'end', class:'chart-label'}, compact(tick)));
   }
   const readout = element('p', 'chart-readout', 'Hover or focus a column for exact counts.');
   readout.setAttribute('aria-live', 'polite');
   const when = at => new Date(at*1000).toLocaleString(undefined, report.step === 3600 ? {month:'short', day:'numeric', hour:'numeric'} : {month:'short', day:'numeric', year:report.step > 86400 ? 'numeric' : undefined});
   points.forEach((point, i) => {
     const ok = point.responses + point.toolOk;
-    if (ok) svg.append(svgNode('path', {d:bar(x(i), top1 + plot - ok/okMax*plot, width, ok/okMax*plot, 2), class:'outcome-ok'}));
-    let base = top2 + plot;
-    const segments = ERRORS.map(([key, , className]) => [errorValue(point, key), className]).filter(([value]) => value);
+    const segments = [[ok, 'outcome-ok'], ...ERRORS.map(([key, , className]) => [errorValue(point, key), className])].filter(([value]) => value);
+    let base = top + plot;
     segments.forEach(([value, className], index) => {
-      const height = value/errMax*plot, last = index === segments.length - 1;
+      const height = Math.max(className === 'outcome-ok' ? 1 : MIN_SEGMENT, value/max*plot);
+      const last = index === segments.length - 1;
       // 2px surface gap between stacked segments; only the top segment is rounded.
-      const drawn = Math.max(1, height - (index ? 2 : 0));
-      svg.append(svgNode('path', {d:last ? bar(x(i), base - height, width, drawn, 2) : `M${x(i)},${base}V${base-drawn}H${x(i)+width}V${base}Z`, class:className}));
-      base -= height;
+      const gap = index ? 2 : 0, drawn = Math.max(1, height - gap), y = base - gap - drawn;
+      svg.append(svgNode('path', {d:last ? bar(x(i), y, width, drawn, 3) : `M${x(i)},${y+drawn}V${y}H${x(i)+width}V${y+drawn}Z`, class:className}));
+      base = y;
     });
-    const label = `${when(point.at)}: ${number(ok)} successful (${number(point.responses)} model responses, ${number(point.toolOk)} tool calls) · ${number(point.toolError)} tool failed · ${number(point.connection)} connection · ${number(point.apiError + point.rateLimit)} API / rate limit`;
-    const hit = svgNode('rect', {x:left + i*band, y:top1, width:band, height:top2 + plot - top1, class:'chart-hit', tabindex:0, 'aria-label':label});
+    const errors = total(point) - ok;
+    const label = `${when(point.at)}: ${number(ok)} successful (${number(point.responses)} model responses, ${number(point.toolOk)} tool calls) · ${number(errors)} errors: ${number(point.toolError)} tool failed, ${number(point.connection)} connection, ${number(point.apiError + point.rateLimit)} API / rate limit`;
+    const hit = svgNode('rect', {x:left + i*band, y:top, width:band, height:plot, class:'chart-hit', tabindex:0, 'aria-label':label});
     hit.append(svgNode('title', {}, label));
     for (const type of ['mouseenter', 'focus']) hit.addEventListener(type, () => { readout.textContent = label; });
     svg.append(hit);

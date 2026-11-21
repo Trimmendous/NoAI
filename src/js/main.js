@@ -13,7 +13,10 @@ import { renderAccounts, renderActivity, renderDetails } from './components/pane
 import { renderJobs, countdown } from './components/jobs.js';
 import { initScheduledTasks } from './components/scheduled-tasks.js';
 import { initDigest } from './components/digest.js';
-import { getDigest, setDigest, runDigestNow } from './services/bridge.js';
+import { initModels } from './components/models.js';
+import { getDigest, setDigest, runDigestNow, openWebLink, pauseScheduledTask, resumeScheduledTask } from './services/bridge.js';
+import { setLinkHandler } from './components/markdown.js';
+setLinkHandler(url => openWebLink(url).catch(error => toast(String(error.message || error), 'error')));
 import { recoverJobMessage } from './core/recovery.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -53,7 +56,7 @@ const store = createStore(initial);
 const theme = initTheme(initial.preferences);
 const persistence = createWorkspacePersistence({ onError: () => toast('Changes could not be saved. Keep Noai open and try again.', 'error') });
 const scheduledTasks = initScheduledTasks({
-  navigate: setView, list: listScheduledTasks, create: createScheduledTask, edit: editScheduledTask, retry: retryScheduledTask, cancel: cancelScheduledTask,
+  navigate: setView, list: listScheduledTasks, create: createScheduledTask, edit: editScheduledTask, retry: retryScheduledTask, cancel: cancelScheduledTask, pause: pauseScheduledTask, resume: resumeScheduledTask,
   getRuns: getScheduledTaskRuns, getResumeJobs: resumeJobs, fetchMetrics: activityMetrics, getModels: harnessModels, ensureProject, native, toast,
   getProjectPath: () => store.getState().projectPath,
   getAutoResume: () => store.getState().preferences.autoResume,
@@ -61,6 +64,7 @@ const scheduledTasks = initScheduledTasks({
   getRuntime: () => runtime,
 });
 
+const modelsPanel = initModels({ getRuntime: () => runtime, getModels: harnessModels, getCustomModels: () => store.getState().preferences.customModels || {}, fetchMetrics: activityMetrics, native });
 const digestPanel = initDigest({
   get: getDigest, set: setDigest, runNow: runDigestNow, getModels: harnessModels, native, toast,
   getRuntime: () => runtime,
@@ -113,6 +117,7 @@ function setView(next) {
   if (next === 'sessions') void sessionsPanel.refresh();
   if (next === 'jobs') void scheduledTasks.onShow();
   if (next === 'digest') void digestPanel.refresh();
+  if (next === 'models') void modelsPanel.refresh();
 }
 function selectConversation(id) {
   store.setState(state => ({ ...state, activeConversationId: id }));
@@ -186,14 +191,14 @@ async function loadModels(harness) {
 function render() {
   const state = store.getState();
   const conversation = active();
-  for (const name of ['home', 'chat', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
+  for (const name of ['home', 'chat', 'models', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
   document.querySelectorAll('.nav-item[data-view]').forEach(button => {
     const selected = button.dataset.view === view || view === 'session' && button.dataset.view === 'sessions' || ['job', 'job-conversation'].includes(view) && button.dataset.view === 'jobs';
     button.classList.toggle('is-active', selected);
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#main-title').textContent = view === 'home' ? 'Home' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts & usage' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
+  $('#main-title').textContent = view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
   const project = conversation?.projectPath || state.projectPath;
   $('#project-label').textContent = state.projectPath ? basename(state.projectPath) : 'Automatic workspace';
   $('#project-label').title = state.projectPath || 'Create a UUID folder in ~/.noai when a chat starts';
@@ -261,6 +266,7 @@ async function refreshRuntime() {
     renderHarnessOptions();
     scheduledTasks.onRuntime();
     digestPanel.onRuntime();
+    if (view === 'models') void modelsPanel.refresh();
   } catch (error) {
     $('#runtime-label').textContent = 'Runtime unavailable';
     $('.runtime-row').classList.add('is-error');

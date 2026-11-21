@@ -1,33 +1,10 @@
 import { element, timeLabel } from './dom.js';
 import { getHarness } from '../core/catalog.js';
+import { renderMarkdown } from './markdown.js';
 
-// Render only known structure; agent output is never inserted as HTML.
-export function renderContent(text) {
-  const fragment = document.createDocumentFragment();
-  const blocks = text.split(/```([^\n`]*)\n([\s\S]*?)(?:```|$)/g);
-  for (let index = 0; index < blocks.length; index += 3) {
-    if (blocks[index]) fragment.append(element('div', 'message-prose', blocks[index]));
-    if (blocks[index + 2] !== undefined) {
-      const wrapper = element('div', 'code-block');
-      const header = element('div', 'code-header');
-      header.append(element('span', '', blocks[index + 1].trim() || 'code'));
-      const copy = element('button', 'text-button', 'Copy');
-      copy.type = 'button';
-      copy.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(blocks[index + 2]);
-          copy.textContent = 'Copied';
-          setTimeout(() => { copy.textContent = 'Copy'; }, 1600);
-        } catch { copy.textContent = 'Select to copy'; }
-      });
-      header.append(copy);
-      const pre = element('pre');
-      pre.append(element('code', '', blocks[index + 2]));
-      wrapper.append(header, pre);
-      fragment.append(wrapper);
-    }
-  }
-  return fragment;
+// Agent replies render as Markdown; the user's own turns stay plain text.
+export function renderContent(text, role = 'assistant') {
+  return role === 'user' ? element('div', 'message-prose', text) : renderMarkdown(text, 'message-markdown');
 }
 
 export function createMessageRenderer(container) {
@@ -65,7 +42,7 @@ export function createMessageRenderer(container) {
       }
       const displayText = message.content || (message.status === 'streaming' ? 'Thinking…' : '');
       if (entry.text !== displayText) {
-        entry.content.replaceChildren(renderContent(displayText));
+        entry.content.replaceChildren(renderContent(displayText, message.role));
         entry.text = displayText;
       }
       entry.status.textContent = message.status === 'waiting' ? 'Waiting for quota — automatic resume scheduled.' : message.status === 'streaming' ? 'Working' : message.status === 'interrupted' ? 'Interrupted — send a follow-up to continue.' : message.status === 'error' ? 'Run ended with an error. Check Activity for recovery details.' : '';

@@ -31,13 +31,17 @@
           </button>
 
           <nav class="primary-nav" aria-label="Main">
-            <button class="nav-item" type="button" data-view="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11H3zM9 21v-8h6v8" /></svg><span>Home</span></button>
-            <button class="nav-item is-active" type="button" data-view="chat" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-14a2 2 0 0 1 2-2z" /><path d="M8 10h8M8 14h5" /></svg><span>Chat</span></button>
-            <button class="nav-item" type="button" data-view="accounts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></svg><span>Accounts</span></button>
+            <p class="nav-group-label">Overview</p>
+            <button class="nav-item" type="button" data-view="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v11H3zM9 21v-8h6v8" /></svg><span>Dashboard</span></button>
             <button class="nav-item" type="button" data-view="activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18.5h16M5.5 15l4-4 3 2 5.5-6" /><circle cx="18" cy="7" r="1" /></svg><span>Activity</span></button>
+            <p class="nav-group-label">Work</p>
+            <button class="nav-item is-active" type="button" data-view="chat" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-14a2 2 0 0 1 2-2z" /><path d="M8 10h8M8 14h5" /></svg><span>Chat</span></button>
             <button class="nav-item" type="button" data-view="jobs"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4m8-4v4M4 10h16m-12 5h3m2 0h3" /></svg><span>Jobs</span></button>
             <button class="nav-item" type="button" data-view="digest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 0 2 0V8" /><path d="M5 4v14a2 2 0 0 0 2 2h12" /><path d="M8 8h6M8 12h6M8 16h4" /></svg><span>Digest</span></button>
             <button class="nav-item" type="button" data-view="sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M9 9v11" /></svg><span>Sessions</span></button>
+            <p class="nav-group-label">Setup</p>
+            <button class="nav-item" type="button" data-view="accounts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></svg><span>Accounts</span></button>
+            <button class="nav-item" type="button" data-view="models"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.5" /><circle cx="5" cy="5" r="2" /><circle cx="19" cy="5" r="2" /><circle cx="5" cy="19" r="2" /><circle cx="19" cy="19" r="2" /><path d="M6.5 6.5l3.7 3.7M17.5 6.5l-3.7 3.7M6.5 17.5l3.7-3.7M17.5 17.5l-3.7-3.7" /></svg><span>Models</span></button>
           </nav>
         </div>
 
@@ -101,22 +105,25 @@
               </div>
             </section>
 
+            <section id="view-models" class="page-view models-view" aria-labelledby="models-title" hidden>
+              <div class="page-heading page-heading-actions"><div><h2 id="models-title">Models</h2><p>Every agent on this computer and the models it can use.</p></div><div class="page-actions"><span id="models-status" class="page-status" role="status"></span><button id="models-refresh" class="secondary-button" type="button">Refresh</button></div></div>
+              <div id="models-content"></div>
+            </section>
             <section id="view-accounts" class="page-view" aria-labelledby="accounts-title" hidden>
-              <div class="page-heading page-heading-with-action"><div><h2 id="accounts-title">Accounts &amp; usage</h2><p>See your coding agents, account plans, and reported usage when available.</p></div><button id="refresh-accounts" class="secondary-button" type="button">Refresh</button></div>
+              <div class="page-heading page-heading-actions"><div><h2 id="accounts-title">Accounts</h2><p>Who you’re signed in as, and how much of each plan is left.</p></div><div class="page-actions"><button id="refresh-accounts" class="secondary-button" type="button">Refresh</button></div></div>
               <div id="account-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◌</span><h3>Checking your accounts</h3><p>Connected agents and usage will appear here.</p></div></div>
             </section>
 
             <section id="view-home" class="page-view home-view" aria-labelledby="home-title" hidden>
-              <div class="page-heading"><h2 id="home-title">Overview</h2><p>Explore your agents’ activity, one useful signal at a time.</p></div>
-              <section class="metrics-section" aria-labelledby="metrics-title">
-                <div class="scheduled-list-heading"><h3 id="metrics-title">Usage &amp; tools</h3><button id="metrics-refresh" class="secondary-button" type="button">Refresh metrics</button></div>
+              <div class="page-heading page-heading-actions"><div><h2 id="home-title">Dashboard</h2><p>How your agents have been doing, at a glance.</p></div><div class="page-actions"><button id="metrics-refresh" class="secondary-button" type="button">Refresh</button></div></div>
+              <section class="metrics-section" aria-labelledby="home-title">
                 <p id="metrics-status" class="metrics-status" role="status">Loading local agent history and Noai activity.</p>
                 <div class="metrics-controls">
-                  <label>Harness<select id="metrics-harness" class="text-field"><option value="">All harnesses</option></select></label>
-                  <label>Model<select id="metrics-model" class="text-field"><option value="">All models</option></select></label>
-                  <label>Period<select id="metrics-range" class="text-field"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="31d">Last 31 days</option><option value="all">All time</option></select></label>
-                  <label>Chart<select id="metrics-value" class="text-field"><option value="total">Total tokens</option><option value="cost">Recorded cost (USD)</option><option value="tools">Tool events</option></select></label>
-                <label class="chart-mode-control">Display<select id="metrics-style" class="text-field"><option value="bar">Bar</option><option value="line">Line</option></select></label>
+                  <label><span class="sr-only">Harness</span><select id="metrics-harness" class="ui-popup"><option value="">All harnesses</option></select></label>
+                  <label><span class="sr-only">Model</span><select id="metrics-model" class="ui-popup"><option value="">All models</option></select></label>
+                  <label><span class="sr-only">Period</span><select id="metrics-range" class="ui-popup"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="31d">Last 31 days</option><option value="all">All time</option></select></label>
+                  <label><span class="sr-only">Chart</span><select id="metrics-value" class="ui-popup"><option value="total">Total tokens</option><option value="cost">Recorded cost (USD)</option><option value="tools">Tool events</option></select></label>
+                <label class="chart-mode-control"><span class="sr-only">Display</span><select id="metrics-style" class="ui-popup"><option value="bar">Bar</option><option value="line">Line</option></select></label>
                 </div>
                 <div id="metrics-totals" class="metrics-totals"></div>
                 <p id="metrics-job-summary" class="metrics-job-summary" role="status"></p>
@@ -128,21 +135,20 @@
                 <div class="metrics-table-wrap"><table class="metrics-table"><thead><tr><th scope="col">Harness</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Tool events</th><th scope="col">Sessions / runs</th></tr></thead><tbody id="metrics-breakdown"></tbody></table><p id="metrics-breakdown-empty" class="metrics-empty">No recorded activity for these filters.</p></div>
               </section>
             </section>
-            <section id="view-activity" class="page-view" aria-labelledby="activity-title" hidden>
-              <div class="page-heading"><h2 id="activity-title">Activity</h2><p>Follow what your coding agents have been doing across conversations.</p></div>
+            <section id="view-activity" class="page-view activity-view" aria-labelledby="activity-title" hidden>
+              <div class="page-heading"><h2 id="activity-title">Activity</h2><p>What you’ve asked your agents, newest first.</p></div>
               <section id="jobs-section" class="jobs-section" aria-labelledby="jobs-title" hidden><h3 id="jobs-title">Waiting &amp; scheduled</h3><div id="resume-list" class="page-list"></div></section>
               <div id="activity-list" class="page-list"><div class="content-placeholder"><span class="placeholder-symbol" aria-hidden="true">◇</span><h3>No activity yet</h3><p>Start a conversation to see activity here.</p></div></div>
             </section>
             <section id="view-sessions" class="page-view sessions-view" aria-labelledby="sessions-heading" hidden>
-              <div class="page-heading"><h2 id="sessions-heading">Sessions</h2><p>Every conversation, in one place. Pick up the story behind any session.</p></div>
-              <div class="sessions-toolbar">
-                <label class="sessions-search"><span class="sr-only">Search sessions</span><input id="sessions-search" class="text-field" type="search" placeholder="Search sessions, projects, models…" /></label>
-                <label><span class="sr-only">Session harness</span><select id="sessions-harness" class="text-field"><option value="">All agents</option></select></label>
-                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="text-field"><option value="recent">Recently updated</option><option value="oldest">Oldest first</option><option value="title">Name</option><option value="tokens">Most tokens</option><option value="context">Fullest context</option></select></label>
-                <button id="sessions-refresh" class="secondary-button" type="button">Refresh</button>
+              <div class="page-heading page-heading-actions"><div><h2 id="sessions-heading">Sessions</h2><p>Every conversation with your agents, in Noai or not.</p></div><div class="page-actions"><button id="sessions-refresh" class="secondary-button" type="button">Refresh</button></div></div>
+              <div id="sessions-filters" class="sessions-filters"></div>
+              <div class="ui-toolbar">
+                <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><span class="sr-only">Search sessions</span><input id="sessions-search" type="search" placeholder="Search sessions, projects, models" spellcheck="false" /></label>
+                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="ui-popup"><option value="recent">Recent</option><option value="oldest">Oldest</option><option value="title">Name</option><option value="tokens">Most tokens</option><option value="context">Fullest context</option></select></label>
               </div>
               <div class="sessions-list-meta"><span id="sessions-count"></span><span id="sessions-status" role="status"></span></div>
-              <div class="sessions-table-wrap"><table class="sessions-table"><caption class="sr-only">Local sessions</caption><thead><tr><th scope="col">Session</th><th scope="col">Project</th><th scope="col">Agent / model</th><th scope="col">Context</th><th scope="col">Tokens</th><th scope="col">Messages</th><th scope="col">Updated</th></tr></thead><tbody id="sessions-body"></tbody></table></div>
+              <div id="sessions-body" class="ui-list sessions-list" aria-label="Sessions"></div>
               <p id="sessions-empty" class="scheduled-empty" hidden>No sessions match. Try a different search or agent.</p>
               <nav class="scheduled-pagination sessions-pagination" aria-label="Session pages"><button id="sessions-previous" class="secondary-button" type="button">Previous</button><span id="sessions-page"></span><button id="sessions-next" class="secondary-button" type="button">Next</button></nav>
             </section>
@@ -167,9 +173,12 @@
               <div id="job-conversation-stream" class="job-conversation-stream"></div>
             </section>
             <section id="view-jobs" class="page-view scheduled-view" aria-labelledby="scheduled-title" hidden>
-              <div class="page-heading"><h2 id="scheduled-title">Jobs</h2><p>A little work off your plate. Follow your scheduled jobs and see how each run went.</p></div>
+              <div class="page-heading page-heading-actions"><div><h2 id="scheduled-title">Jobs</h2><p>Work your agents do on a schedule, even while Noai is closed.</p></div><div class="page-actions"><button id="scheduled-refresh" class="secondary-button" type="button">Refresh</button><button id="scheduled-new-job" class="primary-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>New job</button></div></div>
+              <div id="job-filters" class="job-filters" aria-label="Filter jobs" hidden></div>
+              <label id="job-search-wrap" class="search-field job-search" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><input id="job-search" type="search" placeholder="Search jobs" aria-label="Search jobs" spellcheck="false" /></label>
+              <div id="scheduled-list" class="page-list" aria-live="polite"><div class="content-placeholder"><h3>Loading jobs</h3><p>Your saved jobs will appear here.</p></div></div>
               <details class="job-guide" id="job-guide">
-                <summary>Your first job · desktop and CLI guide</summary>
+                <summary>New to jobs? A quick guide for the app and the terminal</summary>
                 <p>Read this guide without launching an agent or using provider allowance. Close it to skip; open it again any time.</p>
                 <button id="job-practice-start" class="secondary-button" type="button">Try sample walkthrough</button>
                 <section id="job-practice" class="job-practice" aria-labelledby="job-practice-heading" hidden>
@@ -184,7 +193,7 @@
                 </section>
                 <ol>
                   <li><strong>Prepare your agent.</strong> Choose an installed Codex or Claude CLI, complete its sign-in in a terminal, and check the app’s Accounts page. A job uses that agent’s account and may consume its allowance.</li>
-                  <li><strong>Describe a small task.</strong> In New job below, try “Summarize this project.” Choose your project folder, or leave it blank for a new folder. Keep One time for your first run. For Codex inspection tasks, choose read-only permissions.</li>
+                  <li><strong>Describe a small task.</strong> Click New job, try “Summarize this project.” Choose your project folder, or leave it blank for a new folder. Keep One time for your first run. For Codex inspection tasks, choose read-only permissions.</li>
                   <li><strong>Review before starting.</strong> Create job with Run now starts real work. To practice CLI syntax safely, run this from the Noai repository:</li>
                 </ol>
                 <fieldset class="job-guide-inputs">
@@ -202,10 +211,48 @@
                 <p><strong>Follow the result.</strong> Open the job, select its run and use Open conversation. In a terminal, use <code>./bin/noai jobs list</code>, then <code>./bin/noai jobs runs TASK_ID</code>. If the CLI cannot connect, open Noai or start your already-installed user service. Fix sign-in or other reported errors before using <code>./bin/noai jobs retry TASK_ID</code> for an eligible failed, paused or cancelled job.</p>
                 <p><strong>Repeating work:</strong> Days and CLI <code>--every 1d</code> currently mean 86400 seconds; the local hour can shift at daylight-saving changes.</p>
               </details>
-              <div class="scheduled-list-heading"><h3>Your jobs</h3><a class="scheduled-new-job" href="#scheduled-form">New job</a><button id="scheduled-refresh" class="secondary-button" type="button">Refresh</button></div>
-              <div id="scheduled-list" class="page-list" aria-live="polite"><div class="content-placeholder"><h3>Loading jobs</h3><p>Your saved jobs will appear here.</p></div></div>
-              <form id="scheduled-form" class="scheduled-form" autocomplete="off">
-                <div class="scheduled-form-heading"><h3 id="scheduled-form-title">New job</h3><p>Each run starts a fresh conversation and saves its result here.</p></div>
+            </section>
+            <section id="view-digest" class="page-view digest-view" aria-labelledby="digest-title" hidden>
+              <div class="page-heading page-heading-actions"><div><h2 id="digest-title">Daily digest</h2><p>A plain-English morning report on what your agents did and what to do next.</p></div><div class="page-actions"><button id="digest-refresh" class="secondary-button" type="button">Refresh</button><button id="digest-run-now" class="primary-button" type="button">Write one now</button></div></div>
+              <section class="digest-latest" aria-labelledby="digest-latest-title">
+                <h3 id="digest-latest-title" class="ui-group-title">Latest</h3>
+                <article id="digest-output" class="digest-output" aria-live="polite"><div class="content-placeholder"><h3>No digest yet</h3><p>Turn on the daily digest, or write one now.</p></div></article>
+              </section>
+              <section class="digest-history ui-group" aria-labelledby="digest-history-title"><h3 id="digest-history-title" class="ui-group-title">Earlier</h3><div id="digest-history" class="ui-list digest-history-list"></div></section>
+              <form id="digest-form" class="digest-form" autocomplete="off">
+                <section class="ui-group" aria-labelledby="digest-schedule-title">
+                  <h3 id="digest-schedule-title" class="ui-group-title">Schedule</h3>
+                  <div class="ui-list">
+                    <label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Write a daily digest</span><span id="digest-schedule-status" class="ui-row-subtitle">Off</span></span><span class="ui-row-trailing"><input id="digest-enabled" class="ui-switch" type="checkbox" /></span></label>
+                    <label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Time</span><span class="ui-row-subtitle">Your local time</span></span><span class="ui-row-trailing"><input id="digest-time" class="ui-popup" type="time" value="08:00" required /></span></label>
+                    <label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Agent</span></span><span class="ui-row-trailing"><select id="digest-harness" class="ui-popup" required></select></span></label>
+                    <div class="ui-row no-leading"><span class="ui-row-copy"><label class="ui-row-title" for="digest-model">Model</label><span class="ui-row-subtitle">A small, cheap model is plenty</span></span><span class="ui-row-trailing"><select id="digest-model" class="ui-popup"><option value="">Agent default</option></select><label id="digest-custom-model-label" for="digest-custom-model" hidden>Custom model ID</label><input id="digest-custom-model" class="ui-popup digest-custom-model" type="text" placeholder="Exact model ID" spellcheck="false" hidden /></span></div>
+                  </div>
+                </section>
+                <section class="ui-group" aria-labelledby="digest-cover-title">
+                  <h3 id="digest-cover-title" class="ui-group-title"><label for="digest-instructions">What should it cover?</label></h3>
+                  <div class="ui-list digest-instructions-card"><textarea id="digest-instructions" class="digest-instructions" rows="4" maxlength="4000" placeholder="Leave blank for the default: your work sorted into categories, each explained in plain English with links to the sessions behind it, then suggestions for what to do next."></textarea></div>
+                  <p class="ui-footnote">Optional. The digest runs read-only and gets your job and session history in its prompt, so it uses a little of that agent’s allowance.</p>
+                </section>
+                <div class="digest-actions"><span id="digest-form-status" role="status"></span><button id="digest-save" class="primary-button" type="submit">Save</button></div>
+              </form>
+            </section>
+              <section class="digest-history" aria-labelledby="digest-history-title"><h3 id="digest-history-title">Earlier digests</h3><div id="digest-history" class="digest-history-list"></div></section>
+            </section>
+          </main>
+
+          <aside id="details-panel" class="details-panel" aria-label="Conversation details" hidden>
+            <div class="details-heading"><div><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+            <div id="details-content" class="details-content"><p class="details-empty">Project and conversation details will appear here.</p></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="scheduled-dialog" class="job-dialog" aria-labelledby="scheduled-form-title">
+              <form id="scheduled-form" class="scheduled-form job-sheet" method="dialog" autocomplete="off">
+                <div class="scheduled-form-heading"><h2 id="scheduled-form-title">New job</h2><p>Each run starts a fresh conversation and saves the result.</p></div>
+                <div class="job-sheet-body">
                 <div class="scheduled-grid">
                   <label class="scheduled-field"><span>Title</span><input id="scheduled-title-input" class="text-field" type="text" maxlength="160" placeholder="e.g. Review open issues" required /></label>
                   <label class="scheduled-field scheduled-field-wide"><span>Instructions</span><textarea id="scheduled-prompt" class="text-field" rows="5" placeholder="Tell the agent what to do…" required></textarea></label>
@@ -220,42 +267,15 @@
                 <label class="scheduled-field"><span>Job permissions</span><select id="scheduled-permissions" class="text-field"></select><small id="scheduled-permissions-description"></small></label>
                 <label class="permission-control"><input id="scheduled-bypass-permissions" type="checkbox" /><span><strong id="scheduled-bypass-label">Dangerously bypass permissions for Codex</strong><small id="scheduled-bypass-description">Skip tool approvals and the Codex sandbox.</small></span></label>
                 <label class="scheduled-auto-resume"><input id="scheduled-auto-resume" type="checkbox" /> Automatically resume if the agent hits a timed limit</label>
-                <div class="scheduled-form-actions"><span id="scheduled-form-status" role="status"></span><button id="scheduled-edit-cancel" class="secondary-button" type="button" hidden>Cancel editing</button><button id="scheduled-submit" class="primary-button" type="submit">Create job</button></div>
-              </form>
-            </section>
-            <section id="view-digest" class="page-view digest-view" aria-labelledby="digest-title" hidden>
-              <div class="page-heading"><h2 id="digest-title">Daily digest</h2><p>Each day, an agent you choose reads the last 24 hours of your jobs and Codex/Claude usage and writes a short report: what ran, what failed, what is waiting, and what to look at.</p></div>
-              <form id="digest-form" class="scheduled-form digest-form" autocomplete="off">
-                <label class="setting-toggle digest-toggle"><input id="digest-enabled" type="checkbox" /><span><strong>Write a daily digest</strong><small id="digest-schedule-status">Off</small></span></label>
-                <div class="scheduled-grid">
-                  <label class="scheduled-field"><span>Time <small>(your local time)</small></span><input id="digest-time" class="text-field" type="time" value="08:00" required /></label>
-                  <label class="scheduled-field"><span>Agent</span><select id="digest-harness" class="text-field" required></select></label>
-                  <div class="scheduled-field"><label for="digest-model">Model</label><select id="digest-model" class="text-field"><option value="">Agent default</option></select><label id="digest-custom-model-label" for="digest-custom-model" hidden>Custom model ID</label><input id="digest-custom-model" class="text-field" type="text" placeholder="Exact model ID" spellcheck="false" hidden /></div>
                 </div>
-                <p class="digest-note">The digest runs read-only and receives your job history in its prompt, so it uses a small amount of that agent's allowance. A smaller, cheaper model is usually enough.</p>
-                <div class="scheduled-form-actions"><span id="digest-form-status" role="status"></span><button id="digest-run-now" class="secondary-button" type="button">Write one now</button><button id="digest-save" class="primary-button" type="submit">Save</button></div>
+                <div class="scheduled-form-actions"><span id="scheduled-form-status" role="status"></span><button id="scheduled-edit-cancel" class="secondary-button" type="button">Cancel</button><button id="scheduled-submit" class="primary-button" type="submit">Create job</button></div>
               </form>
-              <section class="digest-latest" aria-labelledby="digest-latest-title">
-                <div class="scheduled-list-heading"><h3 id="digest-latest-title">Latest digest</h3><button id="digest-refresh" class="secondary-button" type="button">Refresh</button></div>
-                <article id="digest-output" class="digest-output" aria-live="polite"><div class="content-placeholder"><h3>No digest yet</h3><p>Turn on the daily digest, or write one now.</p></div></article>
-              </section>
-              <section class="digest-history" aria-labelledby="digest-history-title"><h3 id="digest-history-title">Earlier digests</h3><div id="digest-history" class="digest-history-list"></div></section>
-            </section>
-          </main>
-
-          <aside id="details-panel" class="details-panel" aria-label="Conversation details" hidden>
-            <div class="details-heading"><div><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
-            <div id="details-content" class="details-content"><p class="details-empty">Project and conversation details will appear here.</p></div>
-          </aside>
-        </div>
-      </div>
-    </div>
-
+    </dialog>
     <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
       <div class="dialog-heading"><div><h2 id="settings-title">Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
       <div class="dialog-body">
         <fieldset class="settings-group"><legend>Appearance</legend><p>Choose how Noai looks on this device.</p><div id="theme-options" class="segmented-options" role="radiogroup" aria-label="Appearance"><label><input type="radio" name="theme" value="system" /><span>System</span></label><label><input type="radio" name="theme" value="light" /><span>Light</span></label><label><input type="radio" name="theme" value="dark" /><span>Dark</span></label></div></fieldset>
-        <fieldset class="settings-group"><legend>Accent color</legend><p>A small touch of color throughout your workspace.</p><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent color"><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label></div></fieldset>
+        <fieldset class="settings-group"><legend>Accent color</legend><p>Used for buttons, highlights and your chat bubbles.</p><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent color"><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="purple" /><span class="palette-swatch palette-purple" aria-hidden="true"></span><span>Purple</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label></div></fieldset>
         <fieldset class="settings-group automation-group"><legend>Automation</legend><p>Choose what happens when work has to wait or you close the window.</p><label class="setting-toggle"><input id="auto-resume-setting" type="checkbox" /><span><strong>Automatically resume after timed limits</strong><small>Continue a waiting task when its limit resets.</small></span></label><label class="setting-toggle"><input id="background-mode-setting" type="checkbox" /><span><strong>Keep the window in the tray when closed</strong><small>Closing or quitting the window does not stop the scheduler service.</small></span></label></fieldset>
       </div>
     </dialog>

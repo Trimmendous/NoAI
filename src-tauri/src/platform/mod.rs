@@ -39,6 +39,18 @@ pub use family::{
 };
 pub use os::{managed_by_service, start_user_service};
 
+/// Opens an http(s) link in the default browser. Anything else is refused.
+pub fn open_web_link(url: &str) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://"))
+        || url.len() > 2048
+        || url.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err("Only web links can be opened".into());
+    }
+    os::open_url(url).map_err(|error| format!("Could not open the link: {error}"))
+}
+
 use std::{
     collections::HashMap,
     env,
@@ -103,8 +115,14 @@ fn node_version_manager_dirs(home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for (root, suffix) in [
         (home.join(".nvm/versions/node"), "bin"),
-        (home.join(".local/share/fnm/node-versions"), "installation/bin"),
-        (home.join("Library/Application Support/fnm/node-versions"), "installation/bin"),
+        (
+            home.join(".local/share/fnm/node-versions"),
+            "installation/bin",
+        ),
+        (
+            home.join("Library/Application Support/fnm/node-versions"),
+            "installation/bin",
+        ),
         (home.join(".asdf/installs/nodejs"), "bin"),
     ] {
         let Ok(entries) = std::fs::read_dir(&root) else {
@@ -137,8 +155,11 @@ fn is_executable(path: &Path) -> bool {
 /// install locations. Results from the (slow) shell lookup are cached.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
     let first_in = |dirs: &[PathBuf]| {
-        dirs.iter()
-            .find_map(|dir| candidates(dir, name).into_iter().find(|path| is_executable(path)))
+        dirs.iter().find_map(|dir| {
+            candidates(dir, name)
+                .into_iter()
+                .find(|path| is_executable(path))
+        })
     };
     let path_dirs = env::var_os("PATH")
         .map(|paths| env::split_paths(&paths).collect::<Vec<_>>())
@@ -203,7 +224,10 @@ mod tests {
         let home = Path::new("/home/example");
         let dir = os::data_dir(home);
         if cfg!(target_os = "macos") {
-            assert_eq!(dir, home.join("Library/Application Support/dev.noai.desktop"));
+            assert_eq!(
+                dir,
+                home.join("Library/Application Support/dev.noai.desktop")
+            );
         } else if cfg!(unix) {
             assert!(dir.ends_with("dev.noai.desktop"));
         }
@@ -219,7 +243,9 @@ mod tests {
         let tool = bin.join("noai-fake-agent");
         std::fs::write(&tool, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(candidates(&bin, "noai-fake-agent").iter().any(|path| is_executable(path)));
+        assert!(candidates(&bin, "noai-fake-agent")
+            .iter()
+            .any(|path| is_executable(path)));
         let path = child_path(&tool);
         assert_eq!(env::split_paths(&path).next(), Some(bin.clone()));
         std::fs::remove_dir_all(home).unwrap();

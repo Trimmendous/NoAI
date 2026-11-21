@@ -110,8 +110,13 @@ test('appearance is applied and cached for immediate startup', () => {
       theme: 'dark', palette: 'amber', resolvedTheme: 'dark',
     });
     assert.equal(root.dataset.theme, 'dark');
-    assert.deepEqual(JSON.parse(values.get('noai.appearance')), { theme: 'dark', palette: 'amber' });
+    assert.deepEqual(JSON.parse(values.get('noai.appearance')), { theme: 'dark', palette: 'amber', v: 2 });
     assert.equal(applyTheme().palette, 'amber');
+    // The old grey default moves to blue once; a grey chosen after that stays grey.
+    values.set('noai.appearance', JSON.stringify({ theme: 'light', palette: 'graphite' }));
+    assert.equal(applyTheme().palette, 'blue');
+    values.set('noai.appearance', JSON.stringify({ theme: 'light', palette: 'graphite', v: 2 }));
+    assert.equal(applyTheme().palette, 'graphite');
   } finally {
     if (beforeDocument === undefined) delete globalThis.document;
     else globalThis.document = beforeDocument;
@@ -176,4 +181,12 @@ test('permission bypass defaults off and preserves explicit chat choice', () => 
   assert.equal(createConversation().dangerouslyBypassPermissions, false);
   assert.equal(normalizeWorkspace({conversations:[{dangerouslyBypassPermissions:true}]}).conversations[0].dangerouslyBypassPermissions,true);
   assert.equal(normalizeWorkspace({conversations:[{dangerouslyBypassPermissions:'true'}]}).conversations[0].dangerouslyBypassPermissions,false);
+});
+
+test('black-only logos are detected so dark themes can show them in white', async () => {
+  const { isMonochromeSvg } = await import('../src/js/components/ui.js');
+  assert.equal(isMonochromeSvg('<svg><path d="M0 0h1"/></svg>'), true);
+  assert.equal(isMonochromeSvg('<svg><path fill="#000000" d="M0 0h1"/></svg>'), true);
+  assert.equal(isMonochromeSvg('<svg><path fill="#D97757" d="M0 0h1"/></svg>'), false);
+  assert.equal(isMonochromeSvg('<svg><linearGradient id="g"/><path fill="url(#g)"/></svg>'), false);
 });

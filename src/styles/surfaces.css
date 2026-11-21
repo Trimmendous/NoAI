@@ -20,7 +20,6 @@
 .insight-card { border: 0; padding: 0; }
 .insight-card + .insight-card { border-left: 1px solid var(--line); padding-left: 24px; }
 #scheduled-list > .scheduled-group { padding: 0; border: 0; background: transparent; }
-.scheduled-card-actions .secondary-button { color: var(--accent); font-size: 13px; font-weight: 500; }
 .scheduled-card-subtitle, .scheduled-card-meta, .scheduled-card-instructions { font-size: 12px; }
 .session-stats { margin: 22px 0; padding: 20px 22px; }
 .session-stats > .session-stats-grid { padding: 0; }

@@ -55,7 +55,10 @@ pub fn is_executable(path: &Path) -> bool {
 /// Ask the user's login + interactive shell where `name` is, which picks up PATH
 /// changes made in ~/.zshrc, ~/.bashrc, version managers, etc. Bounded to 4s.
 pub fn login_shell_lookup(name: &str) -> Option<PathBuf> {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return None;
     }
     let shell = std::env::var("SHELL")
@@ -83,7 +86,12 @@ pub fn login_shell_lookup(name: &str) -> Option<PathBuf> {
         }
     }
     let mut output = String::new();
-    child.stdout.take()?.take(64 * 1024).read_to_string(&mut output).ok()?;
+    child
+        .stdout
+        .take()?
+        .take(64 * 1024)
+        .read_to_string(&mut output)
+        .ok()?;
     // Interactive shells may print banners; the answer is the last absolute path.
     output
         .lines()

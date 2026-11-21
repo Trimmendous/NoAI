@@ -105,12 +105,28 @@ impl Harness for Claude {
         Box::pin(claude_models())
     }
 
+    fn configured_models(&self, home: &Path) -> Vec<String> {
+        let dir = config_dir(home, "CLAUDE_CONFIG_DIR", ".claude");
+        let settings: Vec<Value> = ["settings.json", "settings.local.json"]
+            .iter()
+            .filter_map(|name| std::fs::read_to_string(dir.join(name)).ok())
+            .filter_map(|text| serde_json::from_str(&text).ok())
+            .collect();
+        let env: Vec<(String, String)> = std::env::vars().collect();
+        claude_configured_models(&settings, &env)
+    }
+
     fn usage(&self) -> BoxFuture<ProviderUsageSnapshot> {
         Box::pin(claude_usage())
     }
 
     fn identity(&self) -> BoxFuture<Option<String>> {
-        Box::pin(async { claude_auth().await.ok().and_then(|auth| claude_identity(&auth)) })
+        Box::pin(async {
+            claude_auth()
+                .await
+                .ok()
+                .and_then(|auth| claude_identity(&auth))
+        })
     }
 
     fn exhausted_reset(&self, now_epoch: u64) -> BoxFuture<Option<u64>> {
@@ -167,8 +183,9 @@ impl Harness for Claude {
                             activities.push(json!({"kind":"thinking","text":text}));
                         }
                     }
-                    Some("tool_use" | "tool_result") => activities
-                        .push(json!({"kind":"tool","text":content_text(&json!([block]))})),
+                    Some("tool_use" | "tool_result") => {
+                        activities.push(json!({"kind":"tool","text":content_text(&json!([block]))}))
+                    }
                     _ => {} // Encrypted/redacted thinking has no readable text.
                 }
             }
@@ -298,7 +315,11 @@ fn outcome_rows(harness: &str, v: &Value, s: &mut FileState) {
         };
         let id = format!("local:claude:result:{call}");
         let mut r = row(&id, harness, session, &s.model, at, "outcome");
-        r["outcome"] = json!(if block["is_error"] == true { "tool_error" } else { "tool_ok" });
+        r["outcome"] = json!(if block["is_error"] == true {
+            "tool_error"
+        } else {
+            "tool_ok"
+        });
         s.rows.insert(id, r);
     }
 }
@@ -320,7 +341,10 @@ fn api_error_row(harness: &str, v: &Value, s: &mut FileState) {
     let session = v["sessionId"].as_str().unwrap_or("");
     let mut r = row(&id, harness, session, &s.model, at, "outcome");
     r["outcome"] = json!(outcome);
-    if let Some(code) = error["connection"]["code"].as_str().or(error["status"].as_str()) {
+    if let Some(code) = error["connection"]["code"]
+        .as_str()
+        .or(error["status"].as_str())
+    {
         r["code"] = json!(code);
     } else if let Some(status) = error["status"].as_u64() {
         r["code"] = json!(status.to_string());
@@ -351,7 +375,9 @@ fn parse_claude(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
                     events.push(event);
                 }
             }
-        } else if let Some(mut event) = token_event(request, &value["usage"], &TOKENS_SNAKE, false, false) {
+        } else if let Some(mut event) =
+            token_event(request, &value["usage"], &TOKENS_SNAKE, false, false)
+        {
             event.resume_id = value["session_id"].as_str().map(str::to_owned);
             events.push(event);
         }
@@ -426,7 +452,6 @@ fn parse_claude(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
     events
 }
 
-
 /// Model aliases the installed Claude Code advertises in `claude --help`
 /// (its `--model` text names the current aliases). No CLI, no models.
 async fn claude_models() -> Vec<HarnessModel> {
@@ -448,11 +473,9 @@ async fn claude_models() -> Vec<HarnessModel> {
         Ok(Ok(output)) => String::from_utf8_lossy(&output.stdout).into_owned(),
         _ => String::new(),
     };
-    let mut aliases = claude_aliases(&help);
-    if aliases.is_empty() {
-        aliases = ["opus", "sonnet", "haiku"].map(String::from).to_vec();
-    }
-    aliases
+    // Only what the installed CLI documents; models from settings and history
+    // are added elsewhere.
+    claude_aliases(&help)
         .into_iter()
         .map(|id| {
             let mut label = id.clone();
@@ -462,9 +485,60 @@ async fn claude_models() -> Vec<HarnessModel> {
             HarnessModel {
                 label: format!("{label} (latest)"),
                 id,
+                source: "agent",
             }
         })
         .collect()
+}
+
+/// Environment variables Claude Code reads to pick or remap models.
+const CLAUDE_MODEL_VARS: &[&str] = &[
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+];
+
+/// Model IDs from Claude Code settings (`model`, `availableModels`, and the
+/// model variables in its `env` block) and from the process environment.
+/// Only these keys are read; other settings and secrets are ignored.
+fn claude_configured_models(settings: &[Value], env: &[(String, String)]) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut add = |value: &str| {
+        let value = value.trim();
+        if !value.is_empty()
+            && value.len() <= 120
+            && !found.iter().any(|known: &String| known == value)
+        {
+            found.push(value.to_owned());
+        }
+    };
+    for file in settings {
+        if let Some(model) = file["model"].as_str() {
+            add(model);
+        }
+        for model in file["availableModels"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            add(model);
+        }
+        for name in CLAUDE_MODEL_VARS {
+            if let Some(model) = file["env"][name].as_str() {
+                add(model);
+            }
+        }
+    }
+    for (name, value) in env {
+        if CLAUDE_MODEL_VARS.contains(&name.as_str()) {
+            add(value);
+        }
+    }
+    found
 }
 
 /// Quoted aliases from the `--model` option's description in `claude --help`.
@@ -530,7 +604,10 @@ async fn claude_usage() -> ProviderUsageSnapshot {
                 probe_limits().await;
             }
             let report = read_limits();
-            let windows = report.as_ref().map(|(_, info)| limit_windows(info)).unwrap_or_default();
+            let windows = report
+                .as_ref()
+                .map(|(_, info)| limit_windows(info))
+                .unwrap_or_default();
             let available = !windows.is_empty();
             ProviderUsageSnapshot { id: "claude", label: "Claude Code",
                 account_label: auth.get("email").and_then(Value::as_str).map(str::to_owned),
@@ -633,7 +710,11 @@ fn limit_windows(info: &Value) -> Vec<ProviderUsageWindow> {
         "Weekly limit" => 1,
         _ => 2,
     };
-    windows.sort_by(|a, b| rank(&a.label).cmp(&rank(&b.label)).then(a.label.cmp(&b.label)));
+    windows.sort_by(|a, b| {
+        rank(&a.label)
+            .cmp(&rank(&b.label))
+            .then(a.label.cmp(&b.label))
+    });
     windows
 }
 
@@ -701,6 +782,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn configured_models_come_from_settings_and_env_only() {
+        let settings = vec![
+            json!({"model": "claude-opus-5-5", "env": {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "my-proxy/haiku", "ANTHROPIC_API_KEY": "secret"}}),
+            json!({"availableModels": ["sonnet", "claude-opus-5-5"]}),
+        ];
+        let env = vec![
+            ("ANTHROPIC_MODEL".to_owned(), "bedrock/claude".to_owned()),
+            ("HOME".to_owned(), "/h".to_owned()),
+        ];
+        assert_eq!(
+            claude_configured_models(&settings, &env),
+            [
+                "claude-opus-5-5",
+                "my-proxy/haiku",
+                "sonnet",
+                "bedrock/claude"
+            ]
+        );
+        assert!(claude_configured_models(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn no_aliases_means_no_models() {
+        assert!(claude_aliases("Usage: claude [options]").is_empty());
+    }
+
+    #[test]
     fn limit_report_becomes_labelled_windows() {
         let info = json!({"status":"allowed","unifiedWindows":{
             "seven_day":{"utilization":0.27,"resetsAt":200,"status":"allowed"},
@@ -722,7 +830,15 @@ mod tests {
         Claude.session_usage(&line, &mut usage);
         line["message"]["usage"]["output_tokens"] = json!(40);
         Claude.session_usage(&line, &mut usage);
-        assert_eq!(usage.tokens(), Tokens { input: 10, cache_read: 1000, cache_write: 200, output: 40 });
+        assert_eq!(
+            usage.tokens(),
+            Tokens {
+                input: 10,
+                cache_read: 1000,
+                cache_write: 200,
+                output: 40
+            }
+        );
         assert_eq!(usage.context_used, Some(1250));
         assert_eq!(usage.context_window, Some(200_000));
         let side = json!({"type":"assistant","isSidechain":true,"message":{"id":"m2","model":"x","usage":{"input_tokens":1,"output_tokens":1}}});
@@ -734,7 +850,10 @@ mod tests {
     #[test]
     fn subagent_transcripts_point_at_their_parent() {
         let child = Path::new("/p/proj/abc/subagents/agent-1.jsonl");
-        assert_eq!(Claude.subagent_parent(child), Some(PathBuf::from("/p/proj/abc.jsonl")));
+        assert_eq!(
+            Claude.subagent_parent(child),
+            Some(PathBuf::from("/p/proj/abc.jsonl"))
+        );
         assert_eq!(Claude.subagent_parent(Path::new("/p/proj/abc.jsonl")), None);
     }
 

@@ -10,7 +10,8 @@ It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 - **Jobs**: tell an agent to do something now, later, or every day. Closing the window doesn't stop them.
 - **Auto-resume**: if an agent hits its usage limit, Noai waits for the reset and picks up where it left off.
 - **Sessions**: every past conversation in one list, including ones you started outside Noai. Each one shows how full its context got and how many tokens it used.
-- **Overview and Activity**: charts of your token use, tool calls and errors over time.
+- **Dashboard and Activity**: charts of your token use, tool calls and errors over time.
+- **Models**: every agent on your computer and the models it can use, drawn as a little graph.
 - **Accounts**: how much of your Claude or Codex quota you have left.
 - **Daily digest**: a short morning report on what ran, what broke and what needs you.
 

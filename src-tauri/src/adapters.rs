@@ -264,7 +264,6 @@ pub fn spawn(request: &RunRequest) -> Result<Child, String> {
         .map_err(|error| format!("Cannot start {}: {error}", request.harness))
 }
 
-
 pub fn parse_line(request: &RunRequest, line: &str) -> Vec<RunEvent> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
@@ -431,13 +430,12 @@ fn parse_duration_seconds(input: &str) -> Option<u64> {
     found.then_some(total)
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     fn harness_args(request: &RunRequest) -> Vec<String> {
-        crate::harness::require(&request.harness).unwrap().args(request)
+        crate::harness::require(&request.harness)
+            .unwrap()
+            .args(request)
     }
 
     use super::*;

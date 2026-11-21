@@ -216,7 +216,14 @@ pub(crate) fn timestamp(v: &Value) -> Option<i64> {
 pub(crate) fn count(v: &Value, key: &str) -> u64 {
     v[key].as_u64().unwrap_or(0)
 }
-pub(crate) fn row(id: &str, harness: &str, session: &str, model: &str, at: i64, kind: &str) -> Value {
+pub(crate) fn row(
+    id: &str,
+    harness: &str,
+    session: &str,
+    model: &str,
+    at: i64,
+    kind: &str,
+) -> Value {
     json!({"id":id,"at":at,"runId":format!("local:{harness}:{session}"),"sessionId":session,"harness":harness,"model":model,"type":kind,"source":"local"})
 }
 fn parse(harness: &str, v: &Value, s: &mut FileState) {

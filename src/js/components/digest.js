@@ -1,5 +1,6 @@
 import { element } from './dom.js';
 import { renderMarkdown } from './markdown.js';
+import { pill, row, tile } from './ui.js';
 import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel } from '../core/catalog.js';
 
 const $ = selector => document.querySelector(selector);
@@ -38,10 +39,11 @@ export function initDigest({ get, set, runNow, getModels, getCustomModels, getRu
   const modelNode = $('#digest-model');
   const customNode = $('#digest-custom-model');
   const status = $('#digest-form-status');
+  const instructionsNode = $('#digest-instructions');
   const output = $('#digest-output');
   const history = $('#digest-history');
   const modelCache = new Map();
-  let state = { task: null, runs: [] };
+  let state = { task: null, runs: [], instructions: null };
   let selectedRunId = null;
   let dirty = false;
   let busy = false;
@@ -91,6 +93,7 @@ export function initDigest({ get, set, runNow, getModels, getCustomModels, getRu
     $('#digest-schedule-status').textContent = scheduleLabel(task);
     if (dirty) return;
     enabledNode.checked = isEnabled(task);
+    instructionsNode.value = state.instructions || '';
     if (task?.anchorAt) $('#digest-time').value = localTimeOf(task.anchorAt);
     renderHarnesses();
     if (task?.harness) harnessNode.value = task.harness;
@@ -115,13 +118,13 @@ export function initDigest({ get, set, runNow, getModels, getCustomModels, getRu
     }
     history.replaceChildren();
     const earlier = runs.filter(item => item !== run).slice(0, 14);
-    if (!earlier.length) history.append(element('p', 'metrics-empty', 'Earlier digests will be listed here.'));
+    history.closest('.digest-history').hidden = !earlier.length;
     for (const item of earlier) {
-      const button = element('button', `digest-history-item status-${item.status}`);
-      button.type = 'button';
-      button.append(element('span', '', when(item.startedAt)), element('small', '', item.status === 'completed' ? 'Ready' : item.status.replace('_', ' ')));
-      button.addEventListener('click', () => { selectedRunId = item.runId; renderOutput(); output.scrollIntoView({ block: 'start', behavior: 'smooth' }); });
-      history.append(button);
+      const firstLine = digestText(item).split('\n').map(line => line.replace(/^#+\s*/, '').trim()).find(line => line && !/^daily digest/i.test(line)) || '';
+      const status = item.status === 'completed' ? null : pill(item.status === 'running' ? 'Writing' : item.status === 'needs_attention' ? 'Needs attention' : item.status.charAt(0).toUpperCase() + item.status.slice(1), ['failed', 'needs_attention'].includes(item.status) ? 'bad' : 'muted');
+      const entry = row({ leading: tile('doc', 'var(--tile-digest)'), title: when(item.startedAt), subtitle: firstLine.length > 110 ? `${firstLine.slice(0, 109)}…` : firstLine || (getHarness(item.harness)?.label || item.harness || ''), trailing: [status], onClick: () => { selectedRunId = item.runId; renderOutput(); output.scrollIntoView({ block: 'start', behavior: 'smooth' }); } });
+      entry.classList.add('digest-history-item', `status-${item.status}`);
+      history.append(entry);
     }
   }
 
@@ -149,9 +152,10 @@ export function initDigest({ get, set, runNow, getModels, getCustomModels, getRu
     busy = true;
     status.textContent = 'Saving…';
     try {
-      const task = await set({ enabled: enabledNode.checked, harness: harnessNode.value, model: model(), startAt, autoResume: true });
+      const instructions = instructionsNode.value.trim() || null;
+      const task = await set({ enabled: enabledNode.checked, harness: harnessNode.value, model: model(), startAt, autoResume: true, instructions });
       dirty = false;
-      state = { ...state, task };
+      state = { ...state, task, instructions };
       status.textContent = enabledNode.checked ? 'Saved.' : 'Daily digest turned off.';
       renderSettings();
     } catch (error) {
@@ -188,6 +192,7 @@ export function initDigest({ get, set, runNow, getModels, getCustomModels, getRu
   $('#digest-run-now').disabled = !native;
   $('#digest-save').disabled = !native;
   enabledNode.disabled = !native;
+  instructionsNode.disabled = !native;
   renderHarnesses();
   void renderModels('');
 

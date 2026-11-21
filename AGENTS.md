@@ -7,9 +7,10 @@ The README is written for people. This file holds the details you need to work o
 - Stack: Tauri 2, Rust and Tokio on the backend, and plain HTML/CSS/JavaScript on the frontend. There is no framework, no bundler, no remote fonts and no production JS dependencies. Keep it that way.
 - The CSP is `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:`. That rules out inline `<script>`, inline `style=""` attributes and `<style>` blocks. Setting styles through the CSSOM (`el.style.width = …`) is allowed. `npm run check` enforces the HTML/JS separation.
 - Colours, radii, shadows and fonts live only in `src/styles/tokens.css`. Components use tokens and never hard-code colours. The exceptions are the fixed status colours for chart errors and the welcome tile, which matches the app icon.
-  - Accent presets are graphite (the default), sage, blue and amber.
+  - Accent presets are blue (the default), purple, sage, amber and graphite. Sidebar icon tiles use the fixed `--tile-*` colours, whatever the accent.
   - A new preset must also be registered in `core/theme.js`, `core/state.js`, `theme-init.js` and the settings radios in `index.html`.
-- The UI is Apple-inspired: system font, a grey backdrop with white rounded cards (`--card-shadow` hairline), pill buttons, iOS-style switches for on/off settings, sentence-case labels and no uppercase eyebrows.
+- The UI is Apple-inspired. Build pages from `components/ui.js` (styled in `ui.css`): icon tiles, grouped lists of compact rows, Reminders-style filter tiles and ring gauges. The sidebar is grouped into Overview, Work and Setup. Use: system font, grouped lists of compact rows (Jobs uses Reminders-style filter tiles, search and a "Show more" row so it scales), sheets for forms, a grey backdrop with white rounded cards (`--card-shadow` hairline), pill buttons, iOS-style switches for on/off settings, sentence-case labels and no uppercase eyebrows.
+- Agent-written text (chat replies, transcripts, job output, the digest) goes through `components/markdown.js`, styled in `markdown.css`. It builds DOM nodes only, wraps long lines instead of scrolling, and only links `https://` URLs (opened in the system browser via `open_web_link`) and in-app `#session=` routes.
 - A global CSS rule gives every `svg` `stroke: currentColor`. Filled shapes in charts or logos need `stroke: none`.
 - Agent-specific code belongs only in `src-tauri/src/harness/`. OS-specific code belongs only in `src-tauri/src/platform/`. Other modules never `cfg` on the OS or name an agent.
 - Never fabricate agent output or usage. Missing data shows as "Not reported" or "Unavailable".
@@ -41,7 +42,7 @@ src/
   js/main.js              App orchestration and event bindings
   js/core/                State, harness catalog, theme, metrics maths
   js/services/            Native bridge, persistence, provider capabilities
-  js/components/          DOM rendering (messages, sessions, charts, jobs, digest…)
+  js/components/          DOM rendering (messages, sessions, charts, jobs, digest, models…); ui.js holds the shared tiles, rows, filter tiles and rings
 src-tauri/src/
   harness/                Every agent CLI behind one `Harness` trait; registry `ALL` in mod.rs
   platform/               OS code: mod.rs shared API; unix.rs, macos.rs, linux.rs, windows.rs
@@ -73,7 +74,7 @@ Write one file in `src-tauri/src/harness/` that implements `Harness`:
 - **Account:** model discovery, usage and sign-in identity.
 - **History (optional):** transcript locations, metrics lines, `session_usage` and `subagent_parent`.
 
-Add it to `ALL` in `harness/mod.rs`. The frontend reads everything through `runtime_status`, so no UI change is needed. The registry test checks that every agent is complete.
+Add it to `ALL` in `harness/mod.rs`. Optionally drop a logo at `src/logos/<id>.svg` (or `.png`); without one the agent gets a coloured letter tile. The frontend reads everything through `runtime_status`, so no UI change is needed. The registry test checks that every agent is complete.
 
 ## Runtime facts
 
@@ -86,10 +87,11 @@ Add it to `ALL` in `harness/mod.rs`. The frontend reads everything through `runt
 - **Finding agent CLIs:** Noai checks PATH first, then the user's login shell, then common install folders (npm, bun, volta, pnpm, nvm, fnm, Homebrew, `~/.local/bin`, `~/.claude/local`, per-OS locations). Children get those folders on PATH so npm CLIs can find `node`.
 - **Codex:**
   - Runs as `codex exec --json` / `exec resume`.
-  - Account and models come from its app-server.
+  - Account and models come from its app-server, plus `model` keys in `config.toml` (top level and profiles).
   - `token_count` events carry running totals; input includes cached tokens.
 - **Claude Code:**
   - Runs as `claude --print --output-format stream-json`.
+  - Models: aliases documented in `claude --help`, plus `model`, `availableModels` and the model env vars in its settings and environment. There is no hardcoded list; the Models tab also adds models seen in local history.
   - Quota comes from its `rate_limit_event` (5-hour and weekly windows). Noai caches it in `claude-limits.json`. When the cache is older than 10 minutes, it refreshes with a tiny Haiku call using no tools and `--no-session-persistence`.
   - Transcripts live in `~/.claude/projects`. Subagents are in `<session>/subagents/agent-*.jsonl` and are folded into their parent session.
 - **Other providers:** OpenRouter reads `OPENROUTER_API_KEY`. Gemini, Copilot and Cursor have no usage adapter; the user can set a plan label by hand.
@@ -133,6 +135,8 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 ./bin/noai jobs runs TASK_ID
 ./bin/noai jobs update-auto-resume TASK_ID true
 ./bin/noai jobs retry TASK_ID [--at ISO-8601]
+./bin/noai jobs pause TASK_ID      # only a job waiting for its next run
+./bin/noai jobs resume TASK_ID     # recurring jobs skip runs missed while paused
 ./bin/noai jobs cancel TASK_ID
 ```
 
@@ -152,11 +156,13 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
   - Missed occurrences collapse into one run.
   - Failed or interrupted runs stop for review and do not repeat automatically.
   - Only jobs that are still Scheduled can be edited; the edit is rejected once the scheduler claims the occurrence.
+- **Pausing:** `paused` means the user paused it; it is not an error and does not show under Needs you. A paused job keeps its settings and history.
 - **Retrying:**
-  - `jobs retry` queues a failed, paused or cancelled job at least a minute from now, and never before a known reset.
+  - `jobs retry` queues a failed, needs-attention or cancelled job at least a minute from now, and never before a known reset.
   - It continues the saved provider session when one exists.
 - **Unattended instructions:** every scheduled run gets `unattended-job.md` prepended. Restart an idle daemon after changing that file.
 - **Daily digest:**
+  - The user can type their own instructions in the Digest tab. Left blank, the default groups the day's jobs and sessions into categories with a plain-English explanation each, `#session=` links, usage and suggestions (`digest.rs`). Its fixed rules (no invented data or links, no tools) always apply.
   - Runs read-only (Codex `read-only`, Claude `dontAsk`) in `~/.noai/digest` on a fixed 24-hour interval.
   - It is hidden from the Jobs list.
 

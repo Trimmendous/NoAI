@@ -1,7 +1,9 @@
 import { element, basename } from './dom.js';
-import { HARNESSES, getHarness } from '../core/catalog.js';
+import { renderMarkdown } from './markdown.js';
+import { getHarness } from '../core/catalog.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
+import { agentColor, agentTile, filterTiles, relativeTime, row } from './ui.js';
 
 const $ = selector => document.querySelector(selector);
 const date = value => value ? new Date(value * 1000).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : '—';
@@ -24,23 +26,21 @@ export function contextPercent(session) {
 }
 
 function contextCell(session) {
-  const cell = element('td', 'session-context'), percent = contextPercent(session);
-  if (percent === null) { cell.append(element('span', 'session-none', '—')); cell.title = 'Not recorded'; return cell; }
+  const cell = element('span', 'session-context'), percent = contextPercent(session);
+  if (percent === null) return null;
   const {used, window} = session.context;
   const meter = element('span', `context-meter${percent >= 80 ? ' is-high' : ''}`), fill = element('span');
   fill.style.width = `${percent}%`; meter.append(fill);
   meter.setAttribute('role', 'img'); meter.setAttribute('aria-label', `Context ${percent.toFixed(0)}% full`);
-  const label = element('span', 'context-label'); label.append(meter, element('strong', '', `${percent.toFixed(0)}%`));
-  cell.append(label, element('small', '', `${compact(used)} / ${compact(window)}`));
+  cell.append(meter, element('span', '', `${percent.toFixed(0)}%`));
   cell.title = `${full(used)} of ${full(window)} tokens in context after the latest call`;
   return cell;
 }
 
 function tokensCell(session) {
-  const cell = element('td', 'session-tokens'), tokens = sessionTokens(session);
-  if (!tokens) { cell.append(element('span', 'session-none', '—')); cell.title = 'Not recorded'; return cell; }
-  cell.append(element('strong', '', compact(tokens.total)));
-  if (tokens.subagentCount) cell.append(element('small', '', `incl. ${tokens.subagentCount} subagent${tokens.subagentCount === 1 ? '' : 's'}`));
+  const cell = element('span', 'session-tokens'), tokens = sessionTokens(session);
+  if (!tokens) return null;
+  cell.append(element('strong', '', compact(tokens.total)), document.createTextNode(' tokens'));
   const t = session.tokens || {};
   cell.title = [`Input ${full(t.input || 0)}`, `Cache read ${full(t.cacheRead || 0)}`, `Cache write ${full(t.cacheWrite || 0)}`, `Output ${full(t.output || 0)}`,
     ...(tokens.subagentCount ? [`Subagents ${full(tokens.subagents)}`] : []), `Total ${full(tokens.total)}`].join('\n');
@@ -58,20 +58,21 @@ export function combineSessions(local, conversations) {
 
 export function initSessions({list, detail, getConversations, fetchMetrics, navigate, native}) {
   let sessions = [], page = 0, selected = null, generation = 0, loading = null, listScroll = 0;
-  const body = $('#sessions-body'), search = $('#sessions-search'), harness = $('#sessions-harness'), sort = $('#sessions-sort');
-  function renderHarnessFilter() {
-    const ids = [...new Set([...HARNESSES.map(item => item.id), ...sessions.map(session => session.harness).filter(Boolean)])];
-    const signature = ids.join('|');
-    if (harness.dataset.signature === signature) return;
-    const selected = harness.value;
-    harness.replaceChildren(new Option('All agents', ''), ...ids.map(id => new Option(getHarness(id)?.label || id, id)));
-    harness.value = ids.includes(selected) ? selected : '';
-    harness.dataset.signature = signature;
+  const body = $('#sessions-body'), search = $('#sessions-search'), sort = $('#sessions-sort');
+  let agent = '';
+  // Filter tiles: all sessions, then one per agent that has any.
+  function renderAgentFilter() {
+    const counts = new Map();
+    for (const session of sessions) if (session.harness) counts.set(session.harness, (counts.get(session.harness) || 0) + 1);
+    if (agent && !counts.has(agent)) agent = '';
+    const items = [{ id:'', label:'All sessions', count:sessions.length, icon:'chat', color:'var(--tile-sessions)' },
+      ...[...counts].sort((a, b) => b[1]-a[1]).map(([id, count]) => ({ id, label:getHarness(id)?.label || id, count, icon:(getHarness(id)?.label || id).slice(0, 1).toUpperCase(), color:agentColor(id), agent:id }))];
+    $('#sessions-filters').replaceChildren(filterTiles(items, agent, id => { agent = id; page = 0; render(); }));
   }
   function render() {
-    renderHarnessFilter();
+    renderAgentFilter();
     const query = search.value.trim().toLowerCase();
-    const filtered = sessions.filter(session => (!harness.value || session.harness === harness.value) && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
+    const filtered = sessions.filter(session => (!agent || session.harness === agent) && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
     const order = {
       title:(a,b) => a.title.localeCompare(b.title),
       oldest:(a,b) => a.updatedAt-b.updatedAt,
@@ -82,16 +83,18 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
     const pages = Math.max(1, Math.ceil(filtered.length/PAGE_SIZE)); page = Math.min(page, pages-1);
     body.replaceChildren();
     for (const session of filtered.slice(page*PAGE_SIZE, (page+1)*PAGE_SIZE)) {
-      const row = element('tr');
-      const title = element('td'), link = element('a', 'session-title-link', session.title || 'Untitled session');
-      link.href = `#session=${encodeURIComponent(session.id)}`;
-      link.addEventListener('click', event => { event.preventDefault(); void open(session); });
-      title.append(link, element('small', '', session.archived ? 'Archived' : session.conversation ? 'Noai' : session.sessionId));
-      const project = element('td', 'session-project', session.projectPath ? basename(session.projectPath) : '—'); project.title = session.projectPath || '';
-      const agent = element('td'); agent.append(element('span', '', getHarness(session.harness)?.label || session.harness), element('small', '', session.model || 'Default model'));
-      row.append(title, project, agent, contextCell(session), tokensCell(session), element('td', 'session-count', String(session.messageCount)), element('td', 'session-date', date(session.updatedAt)));
-      row.addEventListener('click', event => { if (!event.target.closest('a') && !window.getSelection()?.toString()) void open(session); });
-      body.append(row);
+      const label = getHarness(session.harness)?.label || session.harness || 'Agent';
+      const where = session.projectPath ? basename(session.projectPath) : '';
+      const item = row({
+        leading: agentTile(session.harness, label),
+        title: session.title || 'Untitled session',
+        subtitle: [where, session.model || 'Default model', relativeTime(session.updatedAt), session.archived ? 'Archived' : session.conversation ? 'Noai' : ''].filter(Boolean).join(' · '),
+        trailing: [contextCell(session), tokensCell(session)],
+        onClick: () => void open(session),
+      });
+      item.classList.add('session-row');
+      item.title = `${session.title || 'Untitled session'}\n${session.projectPath || 'No project'} · ${label} · ${session.messageCount} messages\nUpdated ${date(session.updatedAt)}`;
+      body.append(item);
     }
     $('#sessions-empty').hidden = filtered.length > 0;
     $('#sessions-count').textContent = `${filtered.length.toLocaleString()} session${filtered.length === 1 ? '' : 's'}`;
@@ -153,7 +156,7 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
           copy.addEventListener('click',async()=>{try{await navigator.clipboard.writeText([message.text,...(message.activities || []).map(item=>item.text)].filter(Boolean).join('\n\n'));copy.textContent='Copied';}catch{copy.textContent='Copy unavailable';}});header.append(copy);
           if (['system','developer','tool','thinking','reasoning'].includes(message.role)) {
             const disclosure = element('details'); disclosure.append(element('summary', '', message.role === 'tool' ? 'Tool activity' : ['thinking','reasoning'].includes(message.role) ? 'Recorded thinking' : 'Session instructions'), element('pre', '', message.text)); article.append(header, disclosure);
-          } else article.append(header, element('div', 'session-message-text', message.text));
+          } else article.append(header, message.role === 'user' ? element('div', 'session-message-text', message.text) : renderMarkdown(message.text, 'session-message-text'));
           for(const activity of message.activities || []) {
             const disclosure=element('details');disclosure.append(element('summary','',activity.kind==='thinking'?'Recorded thinking':'Tool activity'),element('pre','',activity.text));article.append(disclosure);
           }
@@ -173,7 +176,7 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
   $('#session-refresh').addEventListener('click', () => { if (selected) void open(selected, false); });
   $('#sessions-refresh').addEventListener('click', () => void refresh());
   search.addEventListener('input', () => { page = 0; render(); });
-  for (const node of [harness, sort]) node.addEventListener('change', () => { page = 0; render(); });
+  sort.addEventListener('change', () => { page = 0; render(); });
   $('#sessions-previous').addEventListener('click', () => { page--; render(); });
   $('#sessions-next').addEventListener('click', () => { page++; render(); });
   async function route() {

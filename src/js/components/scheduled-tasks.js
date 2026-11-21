@@ -1,12 +1,13 @@
 import { parseLocalTime } from '../core/schedule-time.js';
 import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel } from '../core/catalog.js';
 import { basename, element } from './dom.js';
+import { renderMarkdown } from './markdown.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
+import { group as uiGroup, icon as uiIcon, pill, row as uiRow } from './ui.js';
 
 const $ = selector => document.querySelector(selector);
-const STATUS = { scheduled: 'Scheduled', running: 'Running', waiting: 'Waiting for reset', completed: 'Succeeded', cancelled: 'Cancelled', needs_attention: 'Paused', paused: 'Paused', failed: 'Failed' };
-const PAGE_SIZE = 10;
+const STATUS = { scheduled: 'Scheduled', running: 'Running', waiting: 'Waiting for reset', completed: 'Succeeded', cancelled: 'Cancelled', needs_attention: 'Needs attention', paused: 'Paused', failed: 'Failed' };
 
 function permissionLabel(harness, id = 'provider-default') {
   return getHarness(harness)?.permissions.find(mode => mode.id === id)?.label || id || 'Unknown';
@@ -43,12 +44,62 @@ export function formatScheduledTime(seconds) {
 
 export function formatScheduledInterval(seconds) {
   if (!seconds) return 'One time';
-  if (seconds % 86400 === 0) return `Every ${seconds / 86400} day${seconds === 86400 ? '' : 's'}`;
-  if (seconds % 3600 === 0) return `Every ${seconds / 3600} hour${seconds === 3600 ? '' : 's'}`;
-  return `Every ${seconds / 60} minute${seconds === 60 ? '' : 's'}`;
+  const every = (count, unit) => count === 1 ? `Every ${unit}` : `Every ${count} ${unit}s`;
+  if (seconds % 86400 === 0) return every(seconds / 86400, 'day');
+  if (seconds % 3600 === 0) return every(seconds / 3600, 'hour');
+  return every(Math.round(seconds / 60), 'minute');
 }
 
-export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns, getResumeJobs, fetchMetrics, ensureProject, getModels, native, getProjectPath, getAutoResume, getCustomModels, getRuntime = () => null, toast, navigate }) {
+/** Short, friendly time: "Today 9:00 AM", "Tomorrow 9:00 AM", "Fri 9:00 AM", "Nov 30". */
+export function formatShortTime(seconds, now = new Date()) {
+  if (!Number.isFinite(seconds)) return '';
+  const date = new Date(seconds * 1000);
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - day) / 86400000);
+  if (days === 0) return `Today ${time}`;
+  if (days === 1) return `Tomorrow ${time}`;
+  if (days === -1) return `Yesterday ${time}`;
+  if (days > 1 && days < 7) return `${date.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
+
+const LIST_STEP = 25;
+// Smart filters, like Reminders' smart lists.
+const FILTERS = [
+  { id: 'scheduled', label: 'Scheduled', icon: 'clock' },
+  { id: 'attention', label: 'Needs you', icon: 'alert' },
+  { id: 'running', label: 'Running', icon: 'play' },
+  { id: 'completed', label: 'Completed', icon: 'done' },
+];
+const NEEDS_YOU = new Set(['needs_attention', 'failed']);
+
+// Small icon tile for a job card: a loop for recurring work, a clock for one-off.
+const ICONS = {
+  repeat: ['M17 2l4 4-4 4', 'M3 11V9a3 3 0 0 1 3-3h15', 'M7 22l-4-4 4-4', 'M21 13v2a3 3 0 0 1-3 3H3'],
+  clock: ['M12 7v5l3 2', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z'],
+  done: ['M5 12.5l4.5 4.5L19 7.5'],
+  alert: ['M12 8v5', 'M12 16.5v.01', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z'],
+  play: ['M8 5.5v13l10.5-6.5z'],
+  chevron: ['M9 6l6 6-6 6'],
+  search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M20 20l-4-4'],
+};
+function icon(kind, className = '') {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  if (className) svg.setAttribute('class', className);
+  for (const d of ICONS[kind]) { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path); }
+  return svg;
+}
+function jobTile(kind, status) {
+  const tile = element('span', `scheduled-tile is-${kind} is-${status}`);
+  tile.setAttribute('aria-hidden', 'true');
+  tile.append(icon(kind));
+  return tile;
+}
+
+export function initScheduledTasks({ list, create, edit, retry, cancel, pause, resume, getRuns, getResumeJobs, fetchMetrics, ensureProject, getModels, native, getProjectPath, getAutoResume, getCustomModels, getRuntime = () => null, toast, navigate }) {
   const form = $('#scheduled-form');
   const listNode = $('#scheduled-list');
   const harnessNode = $('#scheduled-harness');
@@ -61,7 +112,9 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   let editing = null;
   let editLocked = false;
   let renderedSignature = '';
-  let completedPage = 0;
+  let filter = 'scheduled';
+  let query = '';
+  let limit = LIST_STEP;
   let metricsCache = [], metricsAt = 0, metricsRequest = null;
   async function sessionMetrics() {
     if (!fetchMetrics) return metricsCache;
@@ -75,6 +128,10 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   }
   let selectedJob = null;
   let selectedRun = null;
+  // Recurring jobs open on an overview with their runs; a run opens on its own.
+  let runView = false;
+  let copying = null;
+  let runLimit = 25;
   let conversationOpen = false;
   let detailSignature = '';
   let listScroll = 0;
@@ -166,7 +223,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   });
 
   function resetForm() {
-    editing = null; editLocked = false;
+    editing = null; editLocked = false; copying = null;
     form.querySelectorAll('input, select, textarea').forEach(node => { node.disabled = false; });
     form.reset(); harnessTouched = false; harnessNode.value = preferredHarness(detected());
     customModelNode.hidden = true;
@@ -174,7 +231,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     customModelNode.required = false;
     $('#scheduled-auto-resume').checked = !!getAutoResume();
     $('#scheduled-form-title').textContent = 'New job';
-    $('#scheduled-edit-cancel').hidden = true;
+    $('#scheduled-form-title').nextElementSibling.textContent = 'Each run starts a fresh conversation and saves the result.';
     submit.textContent = 'Create job'; submit.disabled = !native;
     permissionControls(true); updateControls(); void updateModels();
   }
@@ -187,11 +244,53 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     permissionControls();
     if (editLocked) $('#scheduled-form-status').textContent = 'This job has started or changed. Editing is closed; cancel editing to return to the list.';
   }
+  // Copies a job's settings into the sheet. Returns false if the sheet moved on.
+  async function fillForm(task, isCurrent) {
+    $('#scheduled-title-input').value = task.title;
+    $('#scheduled-prompt').value = task.prompt;
+    $('#scheduled-project').value = task.projectPath || '';
+    harnessNode.value = task.harness;
+    $('#scheduled-auto-resume').checked = task.autoResume;
+    $('#scheduled-bypass-permissions').checked = !!task.dangerouslyBypassPermissions;
+    permissionControls(true);
+    $('#scheduled-permissions').value = task.permissions || 'provider-default';
+    form.elements['scheduled-repeat'].value = task.intervalSeconds ? 'interval' : 'once';
+    if (task.intervalSeconds) {
+      const unit = [86400, 3600, 60, 1].find(unit => task.intervalSeconds % unit === 0);
+      $('#scheduled-interval-unit').value = String(unit);
+      $('#scheduled-interval').value = task.intervalSeconds / unit;
+    }
+    modelNode.value = ''; updateControls();
+    await updateModels();
+    if (!isCurrent()) return false;
+    const known = [...modelNode.options].some(option => option.value === task.model);
+    modelNode.value = task.model ? known ? task.model : '__custom__' : '';
+    customModelNode.value = task.model || ''; updateCustomModel();
+    return true;
+  }
+
+  // "Run again": a new job with the same settings, starting now unless the
+  // user picks a time. A recurring job that stopped is replaced by its copy.
+  async function beginCopy(task) {
+    if (busy || !native) return;
+    resetForm();
+    const replace = !!task.intervalSeconds && !['cancelled', 'completed'].includes(task.status);
+    copying = { id: task.id, replace };
+    $('#scheduled-form-title').textContent = 'Run again';
+    $('#scheduled-form-title').nextElementSibling.textContent = replace ? `Saving replaces “${task.title}” with this copy. Its past runs stay in the history.` : 'Same settings as before. Change anything you like, then run it.';
+    submit.textContent = 'Run';
+    openSheet();
+    const token = copying;
+    if (!await fillForm(task, () => copying === token)) return;
+    form.elements['scheduled-start'].value = 'now';
+    updateControls();
+  }
+
   async function beginEdit(task) {
     if (busy || task.status !== 'scheduled') return;
     resetForm(); editing = {id:task.id, lastRunId:task.lastRunId || null};
+    openSheet();
     $('#scheduled-form-title').textContent = 'Edit job';
-    $('#scheduled-edit-cancel').hidden = false;
     submit.textContent = 'Save changes';
     $('#scheduled-title-input').value = task.title;
     $('#scheduled-prompt').value = task.prompt;
@@ -218,14 +317,31 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     customModelNode.value = task.model || ''; updateCustomModel();
     $('#scheduled-form-status').textContent = 'Changes apply to the next run. Saving closes once it starts.';
     lockEditor();
-    form.scrollIntoView({block:'start', behavior:'smooth'});
-    $('#scheduled-title-input').focus({preventScroll:true});
+    openSheet();
   }
   $('#scheduled-edit-cancel').addEventListener('click', () => {
     if (busy) return;
     resetForm(); $('#scheduled-form-status').textContent = '';
-    listNode.scrollIntoView({block:'start'});
+    closeSheet();
   });
+
+  const dialog = $('#scheduled-dialog');
+  function openSheet() {
+    if (!dialog.open) dialog.showModal();
+    dialog.querySelector('.job-sheet-body').scrollTop = 0;
+    $('#scheduled-title-input').focus({preventScroll:true});
+  }
+  function closeSheet() { if (dialog.open) dialog.close(); }
+  function showForm() {
+    if (busy) return;
+    if (editing || copying) resetForm();
+    $('#scheduled-form-status').textContent = native ? '' : 'Open the desktop app to create jobs.';
+    openSheet();
+  }
+  $('#scheduled-new-job').addEventListener('click', showForm);
+  dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+  dialog.addEventListener('close', () => { if ((editing || copying) && !busy) resetForm(); });
+  $('#job-search').addEventListener('input', event => { query = event.target.value.trim().toLowerCase(); limit = LIST_STEP; renderList(); });
 
   function button(label, action, className = 'secondary-button') {
     const node = element('button', className, label);
@@ -234,8 +350,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
   }
 
   function retryButton(task) {
-    if (!retry || !['needs_attention', 'paused', 'failed', 'cancelled'].includes(task.status)) return null;
-    return button('Retry job', async event => {
+    if (!retry || !['needs_attention', 'failed', 'cancelled'].includes(task.status)) return null;
+    return button(task.status === 'cancelled' ? 'Restart' : 'Retry', async event => {
       const retryNode = event.currentTarget;
       retryNode.disabled = true;
       try {
@@ -251,22 +367,121 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     listScroll = $('#view-jobs').parentElement.scrollTop;
     detailSignature = '';
     selectedJob = task.id; selectedRun = run?.runId || null; conversationOpen = false;
+    runView = !!run || !task.intervalSeconds;
     renderDetail(); navigate('job'); $('#view-job').parentElement.scrollTop=0;
     $('#job-heading').focus();
+  }
+
+  async function act(label, action, done) {
+    try { await action(); toast(done); await refresh(); }
+    catch (error) { toast(`Could not ${label}: ${String(error)}`, 'error'); await refresh(); }
+  }
+
+  // Every control a job offers, in the order people reach for them.
+  function jobActions(task, { compact = false, run = null } = {}) {
+    const nodes = [];
+    const small = compact ? ' is-compact' : '';
+    if (task.status === 'paused' && resume) nodes.push(button('Resume', () => act('resume the job', () => resume(task.id), 'Job resumed.'), `secondary-button${small}`));
+    const retryNode = (!run || run.runId === task.lastRunId) ? retryButton(task) : null;
+    if (retryNode) { if (compact) retryNode.classList.add('is-compact'); nodes.push(retryNode); }
+    if (!compact && (['completed', 'failed', 'cancelled', 'needs_attention'].includes(task.status))) nodes.push(button(task.intervalSeconds && !['cancelled', 'completed'].includes(task.status) ? 'Edit and restart…' : 'Run again…', () => void beginCopy(task)));
+    if (!compact && task.status === 'scheduled' && edit) nodes.push(button('Edit', () => void beginEdit(task)));
+    if (task.status === 'scheduled' && pause) nodes.push(button('Pause', () => act('pause the job', () => pause(task.id), 'Job paused. It won’t start again until you resume it.'), `secondary-button${small}`));
+    if (['scheduled', 'running', 'waiting', 'needs_attention', 'paused', 'failed'].includes(task.status) && !(task.status === 'failed' && !task.intervalSeconds)) {
+      // Two taps: the first asks, the second cancels. Nothing else to undo it.
+      const stop = button('Cancel job', async () => {
+        if (!stop.classList.contains('is-confirming')) {
+          stop.classList.add('is-confirming'); stop.textContent = 'Confirm cancel';
+          setTimeout(() => { if (stop.isConnected) { stop.classList.remove('is-confirming'); stop.textContent = 'Cancel job'; } }, 4000);
+          return;
+        }
+        stop.disabled = true;
+        await act('cancel the job', () => cancel(task.id), 'Job cancelled.');
+      }, `secondary-button is-destructive${small}`);
+      nodes.push(stop);
+    }
+    return nodes;
+  }
+
+  function runTokens(run) {
+    return (run.events || []).filter(event => event.type === 'usage' && event.usage).reduce((sum, event) => sum + (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0), 0);
+  }
+  function duration(run) {
+    if (!run.finishedAt) return '';
+    const seconds = Math.max(0, run.finishedAt - run.startedAt);
+    return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.round(seconds / 60)} min` : `${Math.floor(seconds / 3600)}h ${Math.round(seconds % 3600 / 60)}m`;
+  }
+  const compactNumber = value => Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  const TONE = { completed: 'good', running: 'good', waiting: 'warn', failed: 'bad', needs_attention: 'bad', cancelled: 'muted', paused: 'muted', scheduled: 'accent' };
+
+  // A recurring job: what it does, when it runs next, and every run so far.
+  function renderOverview(task, runs, content) {
+    const status = task.status === 'running' && runs[0] ? runStatus(runs[0]) : task.status;
+    const summary = element('div', 'job-summary');
+    summary.append(jobTile('repeat', status));
+    const copy = element('div', 'job-summary-copy');
+    copy.append(element('strong', '', formatScheduledInterval(task.intervalSeconds)), element('span', '', [agentLabel(task, runs[0]), task.projectPath ? basename(task.projectPath) : ''].filter(Boolean).join(' · ')));
+    copy.append(element('small', '', task.status === 'scheduled' && task.nextRunAt ? `Next run ${formatShortTime(task.nextRunAt)}` : task.status === 'paused' ? 'Paused · resume to put it back on schedule' : STATUS[status] || status));
+    summary.append(copy, pill(STATUS[status] || status, TONE[status] || 'muted'));
+    const actions = element('div', 'job-detail-actions');
+    actions.append(...jobActions(task));
+    const done = runs.filter(run => runStatus(run) === 'completed').length;
+    const failed = runs.filter(run => ['failed', 'needs_attention'].includes(runStatus(run))).length;
+    const tokens = runs.reduce((sum, run) => sum + runTokens(run), 0);
+    const stats = element('div', 'ui-tiles job-run-stats');
+    for (const [label, value, kind, color] of [['Runs', runs.length, 'repeat', 'var(--tile-jobs)'], ['Succeeded', done, 'done', 'var(--tile-chat)'], ['Failed', failed, 'alert', 'var(--tile-alert)'], ['Tokens', tokens ? compactNumber(tokens) : '—', 'bolt', 'var(--tile-home)']]) {
+      const tile = element('div', 'ui-filter ui-stat');
+      tile.style.setProperty('--filter', color);
+      const top = element('span', 'ui-filter-top'), mark = element('span', 'ui-filter-icon');
+      mark.append(uiIcon(kind));
+      top.append(mark, element('strong', '', String(value)));
+      tile.append(top, element('span', 'ui-filter-label', label));
+      stats.append(tile);
+    }
+    const prompt = element('details', 'job-prompt');
+    prompt.append(element('summary', '', 'What it does'), element('p', 'scheduled-card-instructions', task.prompt));
+    const rows = runs.slice(0, runLimit).map((run, index) => {
+      const state = runStatus(run);
+      const number = runs.length - index;
+      const tokensUsed = runTokens(run);
+      return uiRow({
+        leading: jobTile(state === 'completed' ? 'done' : ['failed', 'needs_attention'].includes(state) ? 'alert' : 'clock', state),
+        title: formatShortTime(run.startedAt),
+        subtitle: [`Run ${number}`, duration(run), tokensUsed ? `${compactNumber(tokensUsed)} tokens` : '', run.result && state !== 'completed' ? run.result : ''].filter(Boolean).join(' · '),
+        trailing: [pill(STATUS[state] || state, TONE[state] || 'muted')],
+        onClick: () => { selectedRun = run.runId; runView = true; detailSignature = ''; renderDetail(); $('#view-job').parentElement.scrollTop = 0; },
+        className: 'job-run-row',
+      });
+    });
+    content.replaceChildren(summary, actions, stats, prompt);
+    if (runErrors.has(task.id)) content.append(element('p', 'ui-footnote', runErrors.get(task.id)));
+    if (rows.length) content.append(uiGroup(`Runs · ${runs.length}`, rows, 'Runs'));
+    else content.append(uiGroup('Runs', [element('p', 'ui-list-empty', task.nextRunAt ? `No runs yet. The first one starts ${formatShortTime(task.nextRunAt)}.` : 'No runs yet.')], 'Runs'));
+    if (runs.length > runLimit) content.append(button(`Show ${Math.min(25, runs.length - runLimit)} more runs`, () => { runLimit += 25; detailSignature = ''; renderDetail(); }, 'job-show-more'));
   }
 
   function renderDetail() {
     const task = tasks.find(task => task.id === selectedJob);
     if (!task) return;
     const runs = [...(runCache.get(task.id) || [])].sort((a, b) => b.startedAt - a.startedAt);
+    const overview = !!task.intervalSeconds && !runView;
+    $('#job-back').textContent = task.intervalSeconds && runView ? `← ${task.title}` : '← Back to Jobs';
+    if (overview) {
+      const signature = JSON.stringify(['overview', task, runs, runLimit]);
+      if (signature === detailSignature) return;
+      detailSignature = signature;
+      $('#job-heading').textContent = task.title;
+      renderOverview(task, runs, $('#job-content'));
+      return;
+    }
     // An explicitly selected occurrence must never become a different run.
     const run = selectedRun ? runs.find(run => run.runId === selectedRun) : runs.find(run => run.runId === task.lastRunId) || runs[0];
     if (run) selectedRun = run.runId;
-    const signature = JSON.stringify([task, runs, selectedRun]);
+    const signature = JSON.stringify(['run', task, runs, selectedRun]);
     if (signature === detailSignature) return;
     detailSignature = signature;
     const promptOpen = $('#job-content .job-prompt')?.open || false;
-    $('#job-heading').textContent = task.title;
+    $('#job-heading').textContent = task.intervalSeconds && run ? `${task.title} · ${formatShortTime(run.startedAt)}` : task.title;
     const content = $('#job-content');
     const meta = element('dl', 'session-stats-grid job-overview');
     const technical=element('details','job-technical');technical.append(element('summary','','Schedule & technical details'));
@@ -303,12 +518,12 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     }, 'primary-button');
     conversation.id = 'job-open-conversation';
     const actions = element('div', 'job-detail-actions');
-    actions.append(conversation);
-    const retryAction = (!selectedRun || selectedRun === task.lastRunId) ? retryButton(task) : null;
-    if (retryAction) actions.append(retryAction);
+    // Inside one run of a recurring job, only run-level actions; the rest are on its overview.
+    const retryNode = task.intervalSeconds && (!run || run.runId === task.lastRunId) ? retryButton(task) : null;
+    actions.append(conversation, ...(task.intervalSeconds ? [retryNode].filter(Boolean) : jobActions(task, { run })));
     content.insertBefore(actions,prompt);
     if (task.status === 'scheduled' && task.pendingResumeId) content.insertBefore(element('p', 'scheduled-card-subtitle', `Retry scheduled: ${formatScheduledTime(task.nextRunAt)} · will continue the saved conversation.`), prompt);
-    if (runs.length > 1 || selectedRun && !run) {
+    if (!task.intervalSeconds && (runs.length > 1 || selectedRun && !run)) {
       const label = element('label', 'job-run-picker', 'Run');
       const select = element('select', 'text-field');
       for (const item of runs) select.append(new Option(`${formatScheduledTime(item.startedAt)} · ${STATUS[runStatus(item)] || item.status}`, item.runId));
@@ -334,7 +549,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
         try { await navigator.clipboard.writeText(text); event.target.textContent = 'Copied'; }
         catch { toast('Could not copy this message.', 'error'); }
       }, 'job-copy'));
-      const body = element('pre', 'job-message-text', text);
+      const body = role === 'You' ? element('pre', 'job-message-text', text) : renderMarkdown(text, 'job-message-text');
       bubble.append(header);
       if (collapsible) { const details = element('details'); details.open = expanded[collapseIndex++] || false; details.append(element('summary', '', role), body); bubble.append(details); }
       else bubble.append(body);
@@ -353,96 +568,125 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     stream.replaceChildren(fragment);
   }
 
-  $('#job-back').addEventListener('click', () => { conversationOpen = false; navigate('jobs'); $('#view-jobs').parentElement.scrollTop = listScroll; });
+  $('#job-back').addEventListener('click', () => {
+    conversationOpen = false;
+    const task = tasks.find(item => item.id === selectedJob);
+    if (task?.intervalSeconds && runView) { runView = false; selectedRun = null; detailSignature = ''; renderDetail(); $('#view-job').parentElement.scrollTop = 0; return; }
+    navigate('jobs'); $('#view-jobs').parentElement.scrollTop = listScroll;
+  });
   $('#job-conversation-back').addEventListener('click', () => { conversationOpen = false; navigate('job'); $('#job-open-conversation')?.focus({ preventScroll: true }); });
   $('#job-refresh').addEventListener('click', () => void refresh());
 
-  function renderCard(task, completedRun = null) {
+  // One compact row per job, in a single grouped list. Actions live on the job page.
+  function renderRow(task, completedRun = null) {
     const runs = [...(runCache.get(task.id) || [])].sort((a, b) => b.startedAt - a.startedAt);
     const latest = completedRun || runs.find(run => run.runId === task.lastRunId) || runs[0];
     const status = completedRun || task.status === 'running' && latest ? runStatus(latest) : task.status;
-    const card = element('article', 'scheduled-card');
-    const header = element('div', 'scheduled-card-header');
-    const title = element('h4');
-    title.append(button(task.title, () => openJob(task, completedRun), 'job-title-button'));
-    header.append(title, badge(status));
-    card.addEventListener('click', event => { if (!event.target.closest('button, a, input')) openJob(task, completedRun); });
-    card.append(header, element('p', 'scheduled-agent', agentLabel(task, completedRun)), element('p', 'scheduled-card-subtitle', task.projectPath ? basename(task.projectPath) : ''));
-    const meta = element('div', 'scheduled-card-meta');
-    meta.append(element('span', '', formatScheduledInterval(task.intervalSeconds)));
-    if (task.nextRunAt && task.status === 'scheduled') meta.append(element('span', '', `Next run: ${formatScheduledTime(task.nextRunAt)}`));
-    if (task.dangerouslyBypassPermissions) meta.append(element('span', 'permission-badge', 'Permission bypass enabled'));
-    card.append(meta);
-    if (status === 'needs_attention') card.append(element('p', 'scheduled-card-subtitle', 'Paused · needs attention before work can continue.'));
-    if (status === 'waiting') {
-      const retry = latest?.retryAt || [...(latest?.events || [])].reverse().find(event => event.retryAt)?.retryAt;
-      card.append(element('p', 'scheduled-waiting', retry ? `Token reset: ${formatScheduledTime(retry)}` : 'Waiting for token reset'));
+    const finished = !!completedRun || !task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status);
+    const row = element('button', `job-row is-${status}`);
+    row.type = 'button';
+    row.addEventListener('click', () => openJob(task, completedRun));
+    const copy = element('span', 'job-row-copy');
+    copy.append(element('span', 'job-row-title', task.title));
+    const agent = getHarness(task.harness)?.label || task.harness;
+    const where = task.projectPath ? basename(task.projectPath) : '';
+    const when = completedRun ? `Ran ${formatShortTime(completedRun.finishedAt || completedRun.startedAt)}` : formatScheduledInterval(task.intervalSeconds);
+    // Recurring jobs show how many times they've run; a past run shows which one it was.
+    const ordinal = completedRun ? runs.length - runs.findIndex(item => item.runId === completedRun.runId) : 0;
+    const count = completedRun ? `Run ${ordinal} of ${runs.length} · ${formatScheduledInterval(task.intervalSeconds)}` : task.intervalSeconds ? `${runs.length} run${runs.length === 1 ? '' : 's'}` : '';
+    copy.append(element('span', 'job-row-subtitle', [when, count, agent, where].filter(Boolean).join(' · ')));
+    const trailing = element('span', 'job-row-trailing');
+    if (['running', 'waiting', 'failed', 'needs_attention', 'paused', 'cancelled'].includes(status) || finished) trailing.append(badge(status));
+    else if (task.nextRunAt && task.status === 'scheduled') trailing.append(element('span', 'job-row-when', formatShortTime(task.nextRunAt)));
+    if (task.dangerouslyBypassPermissions && !finished) trailing.prepend(element('span', 'job-row-flag', 'Bypass'));
+    trailing.append(icon('chevron', 'job-row-chevron'));
+    row.append(jobTile(finished ? 'done' : task.intervalSeconds ? 'repeat' : 'clock', status), copy, trailing);
+    const wrap = element('div', 'job-row-wrap');
+    wrap.append(row);
+    const quick = completedRun ? [] : jobActions(task, { compact: true });
+    if (quick.length && native) {
+      const actions = element('div', 'job-row-actions');
+      actions.append(...quick);
+      wrap.append(actions);
     }
-    if (completedRun) card.append(element('p', 'scheduled-card-subtitle', `Finished: ${formatScheduledTime(completedRun.finishedAt || completedRun.startedAt)}`));
-    const actions = element('div', 'scheduled-card-actions');
-    actions.append(button('Open job', () => openJob(task, completedRun)));
-    const retryAction = (!completedRun || completedRun.runId === task.lastRunId) ? retryButton(task) : null;
-    if (retryAction) actions.append(retryAction);
-    if (!completedRun && task.status === 'scheduled' && edit) {
-      const editButton = element('button', 'secondary-button', 'Edit job');
-      editButton.type = 'button';
-      editButton.addEventListener('click', () => void beginEdit(task));
-      actions.append(editButton);
-    }
-    if (!completedRun && ['scheduled', 'running', 'waiting', 'needs_attention', 'paused', 'failed'].includes(task.status)) {
-      const stop = element('button', 'secondary-button', 'Cancel job');
-      stop.type = 'button';
-      stop.addEventListener('click', async () => {
-        stop.disabled = true;
-        try { await cancel(task.id); toast('Job cancelled.'); await refresh(); }
-        catch (error) { toast(`Could not cancel job: ${String(error)}`, 'error'); stop.disabled = false; }
-      });
-      actions.append(stop);
-    }
-    if (actions.childElementCount) card.append(actions);
-    return card;
+    return wrap;
   }
 
-  function renderList() {
-    const signature = JSON.stringify([tasks, completedPage, [...runCache], [...runErrors]]);
-    if (signature === renderedSignature) return;
-    renderedSignature = signature;
-    const fragment = document.createDocumentFragment();
-    const groups = groupJobs(tasks);
-    const completed = groups[2].map(task => ({task, run: null}));
+  function filtered() {
+    const active = tasks.filter(task => !(!task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status)));
+    const completed = tasks.filter(task => !task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status)).map(task => ({ task, run: null }));
     for (const task of tasks.filter(task => task.intervalSeconds)) {
       for (const run of runCache.get(task.id) || []) {
-        if (['completed', 'failed', 'cancelled'].includes(runStatus(run))) completed.push({task, run});
+        if (['completed', 'failed', 'cancelled'].includes(runStatus(run))) completed.push({ task, run });
       }
     }
     completed.sort((a, b) => (b.run?.finishedAt || b.task.createdAt || 0) - (a.run?.finishedAt || a.task.createdAt || 0));
-    groups[2] = completed;
-    const headings = ['Recurring jobs', 'One-time jobs', 'Completed jobs'];
-    const descriptions = ['The work that comes around again.', 'One thing at a time.', 'A record of what’s finished.'];
-    groups.forEach((group, index) => {
-      const section = element('section', 'scheduled-group');
-      section.setAttribute('aria-label', headings[index]);
-      section.append(element('h3', '', `${headings[index]} · ${group.length}`), element('p', 'scheduled-group-description', descriptions[index]));
-      const pages = Math.max(1, Math.ceil(group.length / PAGE_SIZE));
-      if (index === 2) completedPage = Math.min(completedPage, pages - 1);
-      const visible = index === 2 ? group.slice(completedPage * PAGE_SIZE, (completedPage + 1) * PAGE_SIZE) : group;
-      if (!group.length) section.append(element('p', 'scheduled-empty', 'No jobs in this section.'));
-      visible.forEach(item => section.append(index === 2 ? renderCard(item.task, item.run) : renderCard(item)));
-      if (index === 2 && group.length) {
-        const pagination = element('nav', 'scheduled-pagination');
-        pagination.setAttribute('aria-label', 'Completed jobs pages');
-        for (const [label, delta] of [['Previous', -1], ['Next', 1]]) {
-          const button = element('button', 'secondary-button', label);
-          button.type = 'button';
-          button.disabled = delta < 0 ? completedPage === 0 : completedPage === pages - 1;
-          button.addEventListener('click', () => { completedPage += delta; renderList(); listNode.querySelector('.scheduled-pagination')?.scrollIntoView({ block: 'nearest' }); });
-          if (delta === 1) pagination.append(element('span', '', `Page ${completedPage + 1} of ${pages} · ${group.length} jobs`));
-          pagination.append(button);
-        }
-        section.append(pagination);
-      }
+    return {
+      scheduled: active.map(task => ({ task })),
+      attention: tasks.filter(task => NEEDS_YOU.has(task.status)).map(task => ({ task })),
+      running: active.filter(task => ['running', 'waiting'].includes(task.status)).map(task => ({ task })),
+      completed,
+    };
+  }
+
+  function matches(item) {
+    if (!query) return true;
+    const { task } = item;
+    return [task.title, task.prompt, task.projectPath, getHarness(task.harness)?.label, task.model].some(text => String(text || '').toLowerCase().includes(query));
+  }
+
+  function renderList() {
+    const signature = JSON.stringify([tasks, filter, query, limit, [...runCache], [...runErrors]]);
+    if (signature === renderedSignature) return;
+    renderedSignature = signature;
+    const lists = filtered();
+    $('#job-search-wrap').hidden = !tasks.length;
+    const tiles = $('#job-filters');
+    tiles.hidden = !tasks.length;
+    tiles.replaceChildren(...FILTERS.map(item => {
+      const tile = element('button', `job-filter is-${item.id}${filter === item.id ? ' is-selected' : ''}`);
+      tile.type = 'button';
+      tile.setAttribute('aria-pressed', String(filter === item.id));
+      const top = element('span', 'job-filter-top');
+      const dot = element('span', 'job-filter-icon'); dot.append(icon(item.icon));
+      top.append(dot, element('strong', '', String(lists[item.id].length)));
+      tile.append(top, element('span', 'job-filter-label', item.label));
+      tile.addEventListener('click', () => { filter = item.id; limit = LIST_STEP; renderList(); });
+      return tile;
+    }));
+    const fragment = document.createDocumentFragment();
+    if (!tasks.length) {
+      const empty = element('div', 'scheduled-empty-state');
+      empty.append(jobTile('repeat', 'scheduled'), element('h3', '', 'No jobs yet'), element('p', '', 'Hand an agent something to do now, later, or every day. It keeps going even when Noai is closed.'));
+      empty.append(button('Create a job', () => showForm(), 'primary-button'));
+      listNode.replaceChildren(empty);
+      return;
+    }
+    const items = lists[filter].filter(matches);
+    const shown = items.slice(0, limit);
+    // In Scheduled, recurring and one-time jobs get their own headed groups.
+    const groups = filter === 'scheduled'
+      ? [['Recurring', shown.filter(item => item.task.intervalSeconds)], ['One-time', shown.filter(item => !item.task.intervalSeconds)]]
+      : [[FILTERS.find(item => item.id === filter).label, shown]];
+    for (const [label, group] of groups) {
+      if (!group.length) continue;
+      const section = element('section', 'job-group');
+      section.setAttribute('aria-label', `${label} jobs`);
+      section.append(element('h3', 'job-group-title', label));
+      const list = element('div', 'job-list');
+      for (const item of group) list.append(renderRow(item.task, item.run || null));
+      section.append(list);
       fragment.append(section);
-    });
+    }
+    if (!items.length) {
+      const none = element('div', 'job-list job-list-empty');
+      none.append(element('p', '', query ? `No jobs match “${query}”.` : filter === 'attention' ? 'Nothing needs you. Nice.' : filter === 'running' ? 'Nothing is running right now.' : filter === 'completed' ? 'Finished jobs will show up here.' : 'No upcoming jobs.'));
+      fragment.append(none);
+    }
+    if (items.length > shown.length) {
+      const more = button(`Show ${Math.min(LIST_STEP, items.length - shown.length)} more · ${items.length - shown.length} hidden`, () => { limit += LIST_STEP; renderList(); }, 'job-show-more');
+      fragment.append(more);
+    }
     listNode.replaceChildren(fragment);
   }
 
@@ -509,7 +753,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
     }
     busy = true;
     submit.disabled = true;
-    const editTarget = editing;
+    const editTarget = editing, copyTarget = copying;
     $('#scheduled-edit-cancel').disabled = true;
     $('#scheduled-form-status').textContent = editTarget ? 'Saving changes…' : 'Creating job…';
     try {
@@ -519,9 +763,12 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, getRuns,
       const input = { permissions: $('#scheduled-permissions').value, title, prompt, harness: harnessNode.value, model: (modelNode.value === '__custom__' ? customModelNode.value.trim() : modelNode.value) || null, projectPath, startAt, intervalSeconds, autoResume: $('#scheduled-auto-resume').checked, dangerouslyBypassPermissions: $('#scheduled-bypass-permissions').checked };
       if (editTarget) await edit(editTarget.id, input, editTarget.lastRunId);
       else await create(input);
+      // Run again on a stopped recurring job replaces it, so it doesn't run twice.
+      if (copyTarget?.replace) { try { await cancel(copyTarget.id); } catch { /* the copy still exists */ } }
       resetForm();
+      closeSheet();
       $('#scheduled-form-status').textContent = editTarget ? 'Changes saved.' : 'Job created.';
-      toast(editTarget ? 'Job updated.' : 'Job created.');
+      toast(editTarget ? 'Job updated.' : copyTarget ? 'Running it again.' : 'Job created.');
       await refresh();
     } catch (error) { $('#scheduled-form-status').textContent = String(error); toast(`Could not ${editTarget ? 'update' : 'create'} job: ${String(error)}`, 'error'); if (editTarget) await refresh(); }
     finally { busy = false; $('#scheduled-edit-cancel').disabled = false; submit.disabled = editLocked || !native; }

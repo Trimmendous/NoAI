@@ -135,10 +135,18 @@ impl Harness for Codex {
                     Some(HarnessModel {
                         id: id.into(),
                         label: model["displayName"].as_str().unwrap_or(id).into(),
+                        source: "agent",
                     })
                 })
                 .collect()
         })
+    }
+
+    fn configured_models(&self, home: &Path) -> Vec<String> {
+        let path = config_dir(home, "CODEX_HOME", ".codex").join("config.toml");
+        std::fs::read_to_string(path)
+            .map(|text| codex_configured_models(&text))
+            .unwrap_or_default()
     }
 
     fn usage(&self) -> BoxFuture<ProviderUsageSnapshot> {
@@ -319,23 +327,44 @@ impl Harness for Codex {
             if let Some(call) = p["call_id"].as_str() {
                 let id = format!("local:codex:{}:result:{call}", s.session);
                 let mut r = row(&id, harness, &s.session, &s.model, at, "outcome");
-                r["outcome"] = json!(if tool_failed(&p["output"]) { "tool_error" } else { "tool_ok" });
+                r["outcome"] = json!(if tool_failed(&p["output"]) {
+                    "tool_error"
+                } else {
+                    "tool_ok"
+                });
                 s.rows.insert(id, r);
             }
-        } else if v["type"] == "event_msg" && matches!(p["type"].as_str(), Some("error" | "stream_error")) {
+        } else if v["type"] == "event_msg"
+            && matches!(p["type"].as_str(), Some("error" | "stream_error"))
+        {
             let message = p["message"].as_str().unwrap_or("").to_lowercase();
             let outcome = if p["type"] == "stream_error"
-                || ["stream disconnected", "connection", "network", "timed out", "timeout", "dns"]
-                    .iter()
-                    .any(|word| message.contains(word))
+                || [
+                    "stream disconnected",
+                    "connection",
+                    "network",
+                    "timed out",
+                    "timeout",
+                    "dns",
+                ]
+                .iter()
+                .any(|word| message.contains(word))
             {
                 "connection_error"
-            } else if ["rate limit", "usage limit", "429", "quota"].iter().any(|word| message.contains(word)) {
+            } else if ["rate limit", "usage limit", "429", "quota"]
+                .iter()
+                .any(|word| message.contains(word))
+            {
                 "rate_limit"
             } else {
                 "api_error"
             };
-            let id = format!("local:codex:{}:error:{}:{}", s.session, v["timestamp"], s.rows.len());
+            let id = format!(
+                "local:codex:{}:error:{}:{}",
+                s.session,
+                v["timestamp"],
+                s.rows.len()
+            );
             let mut r = row(&id, harness, &s.session, &s.model, at, "outcome");
             r["outcome"] = json!(outcome);
             s.rows.insert(id, r);
@@ -366,7 +395,10 @@ fn tool_failed(output: &Value) -> bool {
     let code = text
         .lines()
         .find_map(|line| line.trim().strip_prefix("Exit code: "))
-        .or_else(|| text.lines().find_map(|line| line.trim().strip_prefix("Process exited with code ")));
+        .or_else(|| {
+            text.lines()
+                .find_map(|line| line.trim().strip_prefix("Process exited with code "))
+        });
     code.and_then(|code| code.trim().parse::<i64>().ok())
         .is_some_and(|code| code != 0)
 }
@@ -423,7 +455,6 @@ fn parse_codex(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
         _ => Vec::new(),
     }
 }
-
 
 async fn rpc(
     stdin: &mut tokio::process::ChildStdin,
@@ -613,10 +644,47 @@ async fn codex_usage() -> ProviderUsageSnapshot {
     }
 }
 
+/// `model = "..."` from Codex's config.toml, at the top level and in every
+/// profile, so custom and provider-specific models show up. Only `model` keys
+/// are read.
+fn codex_configured_models(toml: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for line in toml.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("model") else {
+            continue;
+        };
+        let Some(value) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim();
+        let value = value.split(" #").next().unwrap_or(value).trim();
+        let Some(id) = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+        else {
+            continue;
+        };
+        if !id.is_empty() && id.len() <= 120 && !found.iter().any(|known| known == id) {
+            found.push(id.to_owned());
+        }
+    }
+    found
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configured_models_read_model_keys_only() {
+        let toml = "model = \"gpt-5-codex\"\nmodel_provider = \"azure\"\nmodel_reasoning_effort = \"high\"\n[profiles.local]\nmodel = 'llama3.1:70b' # ollama\n[profiles.fast]\nmodel = \"gpt-5-codex\"\n";
+        assert_eq!(
+            codex_configured_models(toml),
+            ["gpt-5-codex", "llama3.1:70b"]
+        );
+    }
 
     #[test]
     fn codex_session_usage_uses_running_totals_and_reported_window() {
@@ -627,15 +695,28 @@ mod tests {
             "model_context_window":272000}}});
         Codex.session_usage(&line, &mut usage);
         Codex.session_usage(&line, &mut usage);
-        assert_eq!(usage.tokens(), Tokens { input: 2000, cache_read: 3000, cache_write: 0, output: 400 });
-        assert_eq!((usage.context_used, usage.context_window), (Some(2100), Some(272000)));
+        assert_eq!(
+            usage.tokens(),
+            Tokens {
+                input: 2000,
+                cache_read: 3000,
+                cache_write: 0,
+                output: 400
+            }
+        );
+        assert_eq!(
+            (usage.context_used, usage.context_window),
+            (Some(2100), Some(272000))
+        );
     }
 
     #[test]
     fn codex_tool_exit_codes_and_errors_become_outcomes() {
         assert!(tool_failed(&json!("Exit code: 1\nWall time: 0.2 seconds")));
         assert!(!tool_failed(&json!("Exit code: 0\nOutput:")));
-        assert!(tool_failed(&json!("{\"output\":\"x\",\"metadata\":{\"exit_code\":2}}")));
+        assert!(tool_failed(&json!(
+            "{\"output\":\"x\",\"metadata\":{\"exit_code\":2}}"
+        )));
         assert!(!tool_failed(&json!("Success. Updated files")));
         let mut state = FileState::default();
         state.session = "s".into();
@@ -643,7 +724,11 @@ mod tests {
         Codex.metrics_line(&json!({"type":"response_item","timestamp":at,"payload":{"type":"function_call_output","call_id":"c1","output":"Exit code: 127"}}), &mut state);
         Codex.metrics_line(&json!({"type":"event_msg","timestamp":at,"payload":{"type":"stream_error","message":"Reconnecting... 1/5"}}), &mut state);
         Codex.metrics_line(&json!({"type":"event_msg","timestamp":at,"payload":{"type":"error","message":"You've hit your usage limit."}}), &mut state);
-        let outcomes: Vec<_> = state.rows.values().map(|r| r["outcome"].as_str().unwrap().to_owned()).collect();
+        let outcomes: Vec<_> = state
+            .rows
+            .values()
+            .map(|r| r["outcome"].as_str().unwrap().to_owned())
+            .collect();
         assert!(outcomes.contains(&"tool_error".into()));
         assert!(outcomes.contains(&"connection_error".into()));
         assert!(outcomes.contains(&"rate_limit".into()));

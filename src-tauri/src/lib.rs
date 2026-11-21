@@ -4,10 +4,10 @@ mod daemon;
 mod digest;
 mod engine;
 mod harness;
-mod platform;
 mod ipc;
 mod local_metrics;
 mod local_sessions;
+mod platform;
 mod projects;
 mod providers;
 mod runtime;
@@ -69,7 +69,10 @@ pub fn run() {
             runtime::create_scheduled_task,
             runtime::edit_scheduled_task,
             runtime::cancel_scheduled_task,
+            runtime::pause_scheduled_task,
+            runtime::resume_scheduled_task,
             runtime::retry_scheduled_task,
+            runtime::open_web_link,
             runtime::get_digest,
             runtime::set_digest,
             runtime::run_digest_now,

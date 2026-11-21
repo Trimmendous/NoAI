@@ -64,7 +64,6 @@
 .scheduled-card-header .scheduled-status { max-width: 50%; }
 
 .scheduled-run-agent { flex-basis: 100%; color: var(--ink-soft); overflow-wrap: anywhere; }
-.scheduled-new-job { margin-left: auto; color: var(--accent); font-size: 12px; }
 
 .session-stats { margin: 14px 0; padding: 14px 0; border-block: 1px solid var(--line); }
 .session-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin: 0 0 10px; }

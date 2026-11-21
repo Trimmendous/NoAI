@@ -91,6 +91,9 @@ pub struct DigestInput {
     pub start_at: u64,
     #[serde(default = "default_true")]
     pub auto_resume: bool,
+    /// What the user wants the digest to cover. Blank means the default digest.
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -419,6 +422,49 @@ impl ScheduledTasks {
         })
     }
 
+    /// Stops a scheduled job from starting until it is resumed. A run already
+    /// in progress is not interrupted; cancel it instead.
+    pub fn pause(&self, id: &str) -> Result<Task, String> {
+        self.update(|journal| {
+            let task = journal
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == id && !is_digest(task))
+                .ok_or_else(|| "Scheduled task not found".to_string())?;
+            if task.status != "scheduled" {
+                return Err("Only a job that is waiting for its next run can be paused. Cancel a running job instead.".into());
+            }
+            task.status = "paused".into();
+            Ok(task.clone())
+        })
+    }
+
+    /// Puts a paused job back on its schedule. A recurring job skips the
+    /// occurrences it missed while paused; a one-time job that is overdue runs now.
+    pub fn resume(&self, id: &str) -> Result<Task, String> {
+        self.update(|journal| {
+            let task = journal
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == id && !is_digest(task))
+                .ok_or_else(|| "Scheduled task not found".to_string())?;
+            if task.status != "paused" {
+                return Err("This job is not paused.".into());
+            }
+            let current = now();
+            let mut due = task.next_run_at.unwrap_or(current).max(task.created_at);
+            match task.interval_seconds.filter(|interval| *interval > 0) {
+                Some(interval) if due < current => {
+                    due += (current - due).div_ceil(interval) * interval
+                }
+                _ => due = due.max(current),
+            }
+            task.next_run_at = Some(due);
+            task.status = "scheduled".into();
+            Ok(task.clone())
+        })
+    }
+
     pub fn set_auto_resume(&self, id: &str, enabled: bool) -> Result<Task, String> {
         self.update(|journal| {
             let task = journal
@@ -435,13 +481,24 @@ impl ScheduledTasks {
     }
 
     pub fn digest(&self) -> Option<Task> {
-        self.journal.lock().unwrap().tasks.iter().find(|task| is_digest(task)).cloned()
+        self.journal
+            .lock()
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|task| is_digest(task))
+            .cloned()
     }
 
     /// Most recent digest runs, newest first.
     pub fn digest_runs(&self, limit: usize) -> Vec<TaskRun> {
         let journal = self.journal.lock().unwrap();
-        let Some(id) = journal.tasks.iter().find(|task| is_digest(task)).map(|task| &task.id) else {
+        let Some(id) = journal
+            .tasks
+            .iter()
+            .find(|task| is_digest(task))
+            .map(|task| &task.id)
+        else {
             return Vec::new();
         };
         journal
@@ -458,7 +515,12 @@ impl ScheduledTasks {
     /// The digest's own runs are excluded so it never reports on itself.
     pub fn activity_since(&self, since: u64) -> (Vec<Task>, Vec<TaskRun>) {
         let journal = self.journal.lock().unwrap();
-        let tasks: Vec<Task> = journal.tasks.iter().filter(|task| !is_digest(task)).cloned().collect();
+        let tasks: Vec<Task> = journal
+            .tasks
+            .iter()
+            .filter(|task| !is_digest(task))
+            .cloned()
+            .collect();
         let runs = journal
             .runs
             .iter()
@@ -479,6 +541,13 @@ impl ScheduledTasks {
         // Read-only: the digest only summarizes data embedded in its prompt.
         let permissions = crate::harness::require(&input.harness)?.read_only();
         let model = input.model.filter(|value| !value.trim().is_empty());
+        let prompt = match input.instructions.as_deref().map(str::trim) {
+            Some(text) if text.chars().count() > 4000 => {
+                return Err("Keep the digest instructions under 4,000 characters".into())
+            }
+            Some(text) if !text.is_empty() => text.to_owned(),
+            _ => crate::digest::DEFAULT_PROMPT.to_owned(),
+        };
         self.update(|journal| {
             let existing = journal.tasks.iter_mut().find(|task| is_digest(task));
             let Some(task) = existing else {
@@ -488,7 +557,7 @@ impl ScheduledTasks {
                 let task = Task {
                     id: unique_id("digest"),
                     title: "Daily digest".into(),
-                    prompt: "Summarize the last 24 hours of Noai jobs and agent usage.".into(),
+                    prompt,
                     harness: input.harness,
                     model,
                     project_path,
@@ -510,6 +579,7 @@ impl ScheduledTasks {
             };
             task.harness = input.harness;
             task.model = model;
+            task.prompt = prompt;
             task.permissions = Some(permissions);
             task.auto_resume = input.auto_resume;
             task.project_path = project_path;
@@ -727,6 +797,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pause_and_resume_skip_missed_occurrences() {
+        let dir = std::env::temp_dir().join(unique_id("noai-pause-test"));
+        let store = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let task = store
+            .create(CreateTaskInput {
+                title: "Every minute".into(),
+                prompt: "p".into(),
+                harness: "codex".into(),
+                model: None,
+                project_path: "/tmp".into(),
+                start_at: now() + 600,
+                interval_seconds: Some(60),
+                auto_resume: true,
+                dangerously_bypass_permissions: false,
+                permissions: None,
+            })
+            .unwrap();
+        let paused = store.pause(&task.id).unwrap();
+        assert_eq!(paused.status, "paused");
+        assert!(store.claim_due(now() + 10_000).unwrap().is_empty());
+        assert!(store.pause(&task.id).is_err());
+        store
+            .update(|journal| {
+                journal.tasks[0].next_run_at = Some(now() - 150);
+                Ok(())
+            })
+            .unwrap();
+        let resumed = store.resume(&task.id).unwrap();
+        assert_eq!(resumed.status, "scheduled");
+        let due = resumed.next_run_at.unwrap();
+        assert!(due >= now() && due <= now() + 60);
+        assert!(store.resume(&task.id).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn digest_keeps_its_daily_time_survives_failure_and_stays_off() {
         let dir = std::env::temp_dir().join(unique_id("noai-digest-test"));
         let store = ScheduledTasks::open_in_dir(&dir).unwrap();
@@ -737,24 +843,37 @@ mod tests {
             model: Some("sonnet".into()),
             start_at: anchor,
             auto_resume: true,
+            instructions: None,
         };
         let task = store.set_digest(input(true), "/tmp".into()).unwrap();
         assert_eq!(task.next_run_at, Some(anchor));
-        assert_eq!(task.permissions, Some(crate::adapters::JobPermissions::ProviderDefault));
+        assert_eq!(
+            task.permissions,
+            Some(crate::adapters::JobPermissions::ProviderDefault)
+        );
         assert!(store.list().iter().filter(|task| is_digest(task)).count() == 1);
 
         // Run now, then fail: the next run is still the configured daily time.
         store.run_digest_now().unwrap();
         let (claimed, request) = store.claim_due(now() + 1).unwrap().remove(0);
         assert!(is_digest(&claimed));
-        assert!(store.run_digest_now().is_err(), "no second digest while one runs");
-        let after = store.finish(&request.run_id, "failed", "boom".into(), now() + 5).unwrap().unwrap();
+        assert!(
+            store.run_digest_now().is_err(),
+            "no second digest while one runs"
+        );
+        let after = store
+            .finish(&request.run_id, "failed", "boom".into(), now() + 5)
+            .unwrap()
+            .unwrap();
         assert_eq!(after.status, "scheduled");
         assert_eq!(after.next_run_at, Some(anchor));
 
         // After the anchored run, it moves exactly one day later.
         let request = store.claim_due(anchor).unwrap().remove(0).1;
-        let after = store.finish(&request.run_id, "completed", "ok".into(), anchor + 60).unwrap().unwrap();
+        let after = store
+            .finish(&request.run_id, "completed", "ok".into(), anchor + 60)
+            .unwrap()
+            .unwrap();
         assert_eq!(after.next_run_at, Some(anchor + DAY));
         assert_eq!(store.digest_runs(10).len(), 2);
 
@@ -762,7 +881,10 @@ mod tests {
         assert_eq!((off.status.as_str(), off.next_run_at), ("disabled", None));
         assert!(store.claim_due(anchor + 2 * DAY).unwrap().is_empty());
         assert!(store.run_digest_now().is_err());
-        assert!(store.activity_since(0).0.is_empty(), "digest never reports on itself");
+        assert!(
+            store.activity_since(0).0.is_empty(),
+            "digest never reports on itself"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

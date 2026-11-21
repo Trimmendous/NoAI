@@ -67,7 +67,9 @@ fn message(harness: &str, value: &Value) -> Option<Value> {
     if message.text.is_empty() && message.activities.is_empty() {
         return None;
     }
-    Some(json!({"role":message.role,"text":message.text,"at":timestamp(value),"activities":message.activities}))
+    Some(
+        json!({"role":message.role,"text":message.text,"at":timestamp(value),"activities":message.activities}),
+    )
 }
 fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result<Value, String> {
     let file = fs::File::open(path).map_err(|error| error.to_string())?;
@@ -127,12 +129,18 @@ fn summarize(path: &Path, harness: &str, archived: bool, updated: u64) -> Result
     }
     Ok(summary)
 }
-fn list(home: PathBuf) -> Result<Value, String> {
+pub(crate) fn list(home: PathBuf) -> Result<Value, String> {
     let mut files = Vec::new();
     let mut errors = 0;
     for agent in crate::harness::all() {
         for root in agent.history_roots(&home) {
-            discover(&root.path, agent.id(), root.archived, &mut files, &mut errors);
+            discover(
+                &root.path,
+                agent.id(),
+                root.archived,
+                &mut files,
+                &mut errors,
+            );
         }
     }
     let mut index = INDEX
@@ -361,7 +369,9 @@ mod tests {
     fn subagent_sessions_fold_into_their_parent() {
         let dir = std::env::temp_dir().join(format!("noai-subagents-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(dir.join("abc/subagents")).unwrap();
-        let call = |id: &str, input: u64| json!({"type":"assistant","sessionId":"abc","message":{"id":id,"model":"m","role":"assistant","content":"hi","usage":{"input_tokens":input,"output_tokens":1}}}).to_string() + "\n";
+        let call = |id: &str, input: u64| {
+            json!({"type":"assistant","sessionId":"abc","message":{"id":id,"model":"m","role":"assistant","content":"hi","usage":{"input_tokens":input,"output_tokens":1}}}).to_string() + "\n"
+        };
         let parent = dir.join("abc.jsonl");
         let child = dir.join("abc/subagents/agent-1.jsonl");
         fs::write(&parent, call("p", 100)).unwrap();
@@ -371,7 +381,13 @@ mod tests {
             let summary = summarize(path, "claude", false, 1).unwrap();
             index.insert(
                 path.to_string_lossy().into_owned(),
-                Entry { path: path.clone(), harness: "claude".into(), len: 0, modified: SystemTime::UNIX_EPOCH, summary },
+                Entry {
+                    path: path.clone(),
+                    harness: "claude".into(),
+                    len: 0,
+                    modified: SystemTime::UNIX_EPOCH,
+                    summary,
+                },
             );
         }
         let sessions = with_subagents(&index);

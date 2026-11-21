@@ -47,6 +47,7 @@
   --palette-sage: #3e7350;
   --palette-blue: #007aff;
   --palette-amber: #c26a00;
+  --palette-purple: #8944d6;
 }
 
 :root[data-theme='dark'] {
@@ -81,6 +82,7 @@
   --palette-sage: #91b79a;
   --palette-blue: #0a84ff;
   --palette-amber: #ffb340;
+  --palette-purple: #bf5af2;
 }
 
 :root[data-palette='blue'] {
@@ -98,6 +100,22 @@
   --accent-ink: #ffffff;
   --surface-selected: #16304f;
   --focus: rgba(10, 132, 255, 0.55);
+}
+:root[data-palette='purple'] {
+  --accent: #8944d6;
+  --accent-hover: #7637bf;
+  --accent-soft: #f1e9fb;
+  --accent-ink: #ffffff;
+  --surface-selected: #ece3f8;
+  --focus: rgba(137, 68, 214, 0.4);
+}
+:root[data-theme='dark'][data-palette='purple'] {
+  --accent: #bf5af2;
+  --accent-hover: #cd7af5;
+  --accent-soft: #34204a;
+  --accent-ink: #ffffff;
+  --surface-selected: #3a2552;
+  --focus: rgba(191, 90, 242, 0.5);
 }
 :root[data-palette='amber'] {
   --accent: #c26a00;
@@ -130,4 +148,27 @@
   --accent-ink: #1c1c1e;
   --surface-selected: #323235;
   --focus: rgba(209, 209, 214, 0.45);
+}
+
+/* Section colours for sidebar icon tiles. Fixed, so the app keeps colour
+   whatever accent is chosen (like macOS System Settings). */
+:root {
+  --tile-home: #007aff;
+  --tile-chat: #34c759;
+  --tile-accounts: #ff9500;
+  --tile-activity: #ff2d55;
+  --tile-jobs: #af52de;
+  --tile-digest: #30b0c7;
+  --tile-sessions: #5856d6;
+  --tile-settings: #8e8e93;
+  --tile-alert: #ff3b30;
+  --tile-models: #00c7be;
+  /* One fixed colour per agent, used for its tile on every page. */
+  --agent-claude: #d97757;
+  --agent-codex: #10a37f;
+  --agent-gemini: #4285f4;
+  --agent-copilot: #6e40c9;
+  --agent-cursor: #3a3a3c;
+  --agent-openrouter: #6467f2;
+  --agent-noai: #007aff;
 }

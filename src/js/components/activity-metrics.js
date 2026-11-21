@@ -1,3 +1,4 @@
+import { icon } from './ui.js';
 import { renderUsageChart } from './usage-chart.js';
 import { renderOutcomesChart } from './outcomes-chart.js';
 import { element } from './dom.js';
@@ -24,12 +25,13 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
     const jobs=summarizeJobRuns(jobRuns,filters);
     $('#metrics-job-summary').textContent=jobError || `${jobs.total} Noai occurrences across ${jobs.jobs} jobs · ${jobs.completed} succeeded · ${jobs.failed} failed · ${jobs.waiting} waiting · ${jobs.running} running · ${jobs.other} other. Selected by start time; each occurrence counted once, including its resumes.`;
     const cards=$('#metrics-totals');cards.replaceChildren();
-    for(const [label,value,note] of [
-      ['Reported tokens',report.usageReports?number(report.tokens):'Not reported',report.usageReports?`${number(report.input)} input · ${number(report.output)} output`:'Waiting for CLI usage data'],
-      ['Cache-hit rate',report.cacheRate===null?'Unavailable':`${(report.cacheRate*100).toFixed(1)}%`,'Cached reads ÷ all input tokens'],
-      ['Recorded cost',report.cost===null?'Unavailable':`$${report.cost.toLocaleString(undefined,{maximumFractionDigits:4})}`,`${report.costReports} / ${report.usageReports} usage reports covered · USD`],
-      ['Active sessions / runs',number(report.runs),'Unique provider sessions; unlinked Noai runs counted separately']
-    ]) {const card=element('div','metrics-stat');card.append(element('span','metric-label',label),element('strong','metrics-stat-value',value),element('small','',note));cards.append(card);}
+    const compactNumber=value=>Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(value);
+    for(const [label,value,note,kind,color,title] of [
+      ['Tokens',report.usageReports?compactNumber(report.tokens):'—',report.usageReports?`${compactNumber(report.input)} in · ${compactNumber(report.output)} out`:'Waiting for CLI usage data','bolt','var(--tile-home)',report.usageReports?`${number(report.tokens)} reported tokens`:''],
+      ['Cache hits',report.cacheRate===null?'—':`${(report.cacheRate*100).toFixed(1)}%`,'Cached reads ÷ all input','stack','var(--tile-chat)',''],
+      ['Cost',report.cost===null?'—':`$${report.cost.toLocaleString(undefined,{maximumFractionDigits:2})}`,report.cost===null?'Not reported by your agents':`${report.costReports} / ${report.usageReports} reports priced · USD`,'coin','var(--tile-accounts)',''],
+      ['Sessions',number(report.runs),'Agent sessions and Noai runs','chat','var(--tile-jobs)','']
+    ]) {const card=element('div','ui-filter ui-stat metrics-stat');card.style.setProperty('--filter',color);const top=element('span','ui-filter-top'),mark=element('span','ui-filter-icon');mark.append(icon(kind));const strong=element('strong','metrics-stat-value',value);if(title)strong.title=title;top.append(mark,strong);card.append(top,element('span','ui-filter-label metric-label',label),element('small','',note));cards.append(card);}
     renderUsageChart($('#metrics-chart'),report,{metric:metric.value,style:style.value});
     renderOutcomesChart($('#metrics-outcomes'),report);
     const insights=$('#metrics-insights');insights.replaceChildren();

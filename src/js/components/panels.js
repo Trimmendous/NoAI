@@ -2,62 +2,71 @@ import { element, basename, timeLabel } from './dom.js';
 import { buildProviderCards } from '../services/providers.js';
 import { getHarness } from '../core/catalog.js';
 import { countdown } from './jobs.js';
+import { agentTile, group, pill, ring, row, tile } from './ui.js';
 
+/** "Resets in 2h 5m" when soon, otherwise "Resets Tue 9:00 PM". */
+function resetLabel(at) {
+  if (at * 1000 - Date.now() > 36 * 3600000) return `Resets ${new Date(at * 1000).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+  return `Resets ${countdown(at).replace(/^In /, 'in ')}`;
+}
+
+// Connected agents get a panel with Activity-style rings for each usage window;
+// everything else is one compact row in a grouped list.
 export function renderAccounts(container, runtime, native, snapshots = [], manualPlans = {}, editPlan = () => {}) {
   const fragment = document.createDocumentFragment();
-  const intro = element('div', 'notice', native
-    ? 'Your existing sign-ins power supported account checks. Each card shows its data source; unavailable quotas are never estimated.'
-    : 'Browser preview · Open the Noai desktop app to detect your installed coding agents.');
-  fragment.append(intro);
+  const panels = element('div', 'account-panels');
+  const others = [];
   for (const provider of buildProviderCards(runtime)) {
     const snapshot = snapshots.find(item => item.id === provider.id);
-    const card = element('article', 'account-card');
-    const header = element('div', 'account-header');
-    const name = element('div', 'account-name');
-    name.append(element('span', 'provider-mark', provider.label.slice(0, 1)), element('h3', '', provider.label));
     const ready = provider.harness && provider.installed;
     const available = snapshot?.status === 'available';
-    header.append(name, element('span', `account-status ${available ? 'is-ready' : ''}`, !native ? 'Desktop required' : available ? 'Connected' : snapshot?.status === 'stale' ? 'Stale data' : snapshot?.status === 'error' ? 'Check connection' : ready ? 'CLI detected' : 'Unavailable'));
-    const metrics = element('div', 'account-metrics');
     const manual = manualPlans[provider.id];
-    for (const [label, value] of [['Plan', snapshot?.plan || (manual ? `${manual} · user set` : 'Unavailable')], ['Account', snapshot?.accountLabel || 'Not reported']]) {
-      const metric = element('div');
-      metric.append(element('span', 'metric-label', label), element('span', 'metric-value', value));
-      metrics.append(metric);
-    }
-    card.append(header, metrics);
-    for (const window of snapshot?.windows || []) {
-      const row = element('div', 'usage-window');
-      const rowHeader = element('div', 'usage-window-header');
-      rowHeader.append(element('span', '', window.label));
-      if (Number.isFinite(window.usedPercent)) {
-        const used = Math.max(0, Math.min(100, window.usedPercent));
-        rowHeader.append(element('strong', '', `${Math.round(used)}% used`));
-        row.append(rowHeader);
-        const meter = element('progress', 'usage-meter');
-        meter.max = 100;
-        meter.value = used;
-        meter.setAttribute('aria-label', `${window.label}: ${Math.round(used)}% used`);
-        row.append(meter);
-      } else {
-        rowHeader.append(element('strong', '', Number.isFinite(window.remaining) ? `${window.remaining.toLocaleString()} remaining${window.unit ? ` ${window.unit}` : ''}` : 'Remaining not reported'));
-        row.append(rowHeader);
-      }
-      if (window.resetsAt) row.append(element('span', 'usage-reset', `${countdown(window.resetsAt)} · ${new Date(window.resetsAt * 1000).toLocaleString()}`));
-      if (Number.isFinite(window.usedPercent) && Number.isFinite(window.remaining)) row.append(element('span', 'usage-reset', `${window.remaining.toLocaleString()}${window.unit ? ` ${window.unit}` : ''} remaining${Number.isFinite(window.limit) ? ` of ${window.limit.toLocaleString()}` : ''}`));
-      card.append(row);
-    }
-    if (!snapshot?.windows?.length) card.append(element('p', 'usage-empty', 'Remaining quota is unavailable.'));
-    card.append(element('p', 'usage-empty', snapshot?.detail || (native ? 'This provider does not expose usage through a connected adapter.' : 'Open the desktop app to check this account.')));
-    const footer = element('div', 'account-footer');
-    footer.append(element('span', 'source-label', `${snapshot?.source || 'unavailable'}${snapshot?.fetchedAt ? ` · Checked ${timeLabel(snapshot.fetchedAt * 1000)}` : ''}`));
-    const planButton = element('button', 'secondary-button plan-button', manual ? 'Edit plan label' : 'Set plan label');
+    const plan = snapshot?.plan || (manual ? `${manual} · user set` : '');
+    const status = !native ? ['Desktop required', 'muted'] : available ? ['Connected', 'good'] : snapshot?.status === 'stale' ? ['Stale data', 'warn'] : snapshot?.status === 'error' ? ['Check connection', 'bad'] : ready ? ['CLI detected', 'accent'] : ['Not connected', 'muted'];
+    const planButton = element('button', 'text-button plan-button', manual ? 'Edit plan label' : 'Set plan label');
     planButton.type = 'button';
     planButton.addEventListener('click', () => editPlan(provider.id, provider.label));
-    footer.append(planButton);
+    if (!available && !snapshot?.windows?.length) {
+      const item = row({ leading: agentTile(provider.id, provider.label), title: provider.label, subtitle: plan || snapshot?.detail || (native ? (ready ? 'Installed · usage not reported by this agent' : 'Not installed on this computer') : 'Open the desktop app to check this account'), trailing: [pill(status[0], status[1]), planButton] });
+      item.classList.add('account-card');
+      others.push(item);
+      continue;
+    }
+    const card = element('article', 'account-card account-panel');
+    const header = element('div', 'account-panel-header');
+    const name = element('div', 'account-panel-name');
+    name.append(element('h3', '', provider.label), element('p', '', [snapshot?.accountLabel, plan].filter(Boolean).join(' · ') || 'Account not reported'));
+    header.append(agentTile(provider.id, provider.label, 'is-large'), name, pill(status[0], status[1]));
+    card.append(header);
+    const gauges = element('div', 'account-gauges');
+    for (const window of snapshot?.windows || []) {
+      const gauge = element('div', 'account-gauge');
+      const copy = element('div', 'account-gauge-copy');
+      if (Number.isFinite(window.usedPercent)) {
+        const used = Math.max(0, Math.min(100, window.usedPercent));
+        gauge.append(ring(100 - used, { remaining: true, label: `${window.label}: ${Math.round(used)}% used` }));
+        copy.append(element('strong', '', window.label), element('span', '', `${Math.round(used)}% used`));
+      } else {
+        copy.append(element('strong', '', window.label), element('span', '', Number.isFinite(window.remaining) ? `${window.remaining.toLocaleString()}${window.unit ? ` ${window.unit}` : ''} left` : 'Remaining not reported'));
+      }
+      if (window.resetsAt) copy.append(element('small', '', resetLabel(window.resetsAt)));
+      if (Number.isFinite(window.usedPercent) && Number.isFinite(window.remaining)) copy.append(element('small', '', `${window.remaining.toLocaleString()}${window.unit ? ` ${window.unit}` : ''} left${Number.isFinite(window.limit) ? ` of ${window.limit.toLocaleString()}` : ''}`));
+      gauge.title = window.resetsAt ? `Resets ${new Date(window.resetsAt * 1000).toLocaleString()}` : '';
+      gauge.append(copy);
+      gauges.append(gauge);
+    }
+    if (!gauges.childElementCount) gauges.append(element('p', 'usage-empty', 'Remaining quota is unavailable.'));
+    card.append(gauges);
+    const footer = element('div', 'account-footer');
+    footer.append(element('span', 'source-label', `${snapshot?.detail ? `${snapshot.detail} · ` : ''}${snapshot?.source === 'provider' ? 'From the provider' : snapshot?.source || 'Unavailable'}${snapshot?.fetchedAt ? ` · checked ${timeLabel(snapshot.fetchedAt * 1000)}` : ''}`), planButton);
     card.append(footer);
-    fragment.append(card);
+    panels.append(card);
   }
+  if (panels.childElementCount) fragment.append(panels);
+  if (others.length) fragment.append(group(panels.childElementCount ? 'Other agents and services' : 'Agents and services', others));
+  fragment.append(element('p', 'ui-footnote', native
+    ? 'Noai reuses each CLI’s own sign-in. Quotas that a provider doesn’t report are never estimated.'
+    : 'Browser preview · Open the Noai desktop app to detect your installed coding agents.'));
   container.replaceChildren(fragment);
 }
 
@@ -89,21 +98,28 @@ export function renderDetails(container, conversation, workspace, running) {
 }
 
 export function renderActivity(container, workspace, liveActivities) {
-  const entries = workspace.conversations.flatMap(conversation => conversation.messages.filter(message => message.role === 'user' || message.role === 'system').map(message => ({ id: message.id, text: message.content, at: message.createdAt, title: conversation.title, project: basename(conversation.projectPath) })));
+  const entries = workspace.conversations.flatMap(conversation => conversation.messages.filter(message => message.role === 'user' || message.role === 'system').map(message => ({ id: message.id, text: message.content, at: message.createdAt, title: conversation.title, project: basename(conversation.projectPath), harness: conversation.harness, role: message.role })));
   entries.push(...liveActivities);
   entries.sort((a, b) => b.at.localeCompare(a.at));
   if (!entries.length) {
-    const empty = element('div', 'empty-state content-placeholder');
-    empty.append(element('span', 'placeholder-symbol', '◇'), element('h3', '', 'Nothing in motion. Yet.'), element('p', '', 'Your prompts and agent activity will appear here.'));
+    const empty = element('div', 'scheduled-empty-state');
+    empty.append(tile('chat', 'var(--tile-activity)', 'is-large'), element('h3', '', 'Nothing in motion yet'), element('p', '', 'Your prompts and agent activity will show up here.'));
     container.replaceChildren(empty);
     return;
   }
-  const fragment = document.createDocumentFragment();
+  // Group by day, newest first, like Notification Center.
+  const days = new Map();
   for (const entry of entries.slice(0, 100)) {
-    const item = element('article', 'activity-item');
-    item.append(element('span', 'activity-dot'), element('div', 'activity-copy'));
-    item.lastChild.append(element('h3', '', entry.title || 'Agent activity'), element('p', '', entry.text), element('time', 'activity-time', `${new Date(entry.at).toLocaleDateString()} · ${timeLabel(entry.at)}`));
-    fragment.append(item);
+    const date = new Date(entry.at);
+    const today = new Date(); const yesterday = new Date(Date.now() - 86400000);
+    const key = date.toDateString() === today.toDateString() ? 'Today' : date.toDateString() === yesterday.toDateString() ? 'Yesterday' : date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+    if (!days.has(key)) days.set(key, []);
+    const label = getHarness(entry.harness)?.label;
+    const item = row({ leading: entry.role === 'system' ? tile('alert', 'var(--tile-settings)') : label ? agentTile(entry.harness, label) : tile('chat', 'var(--tile-activity)'), title: entry.title || 'Agent activity', subtitle: entry.text || '', trailing: [timeLabel(entry.at)] });
+    item.classList.add('activity-row');
+    days.get(key).push(item);
   }
+  const fragment = document.createDocumentFragment();
+  for (const [day, rows] of days) fragment.append(group(day, rows));
   container.replaceChildren(fragment);
 }

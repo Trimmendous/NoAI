@@ -28,9 +28,16 @@
 
 .primary-nav { display: grid; gap: 1px; margin-top: 18px; }
 .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: var(--radius-sm); color: var(--ink); background: transparent; text-align: left; font-size: 13px; font-weight: 500; }
-.nav-item svg { width: 17px; height: 17px; color: var(--accent); }
+.nav-item svg { box-sizing: content-box; width: 14px; height: 14px; padding: 4px; border-radius: 6px; color: #fff; background: var(--tile, var(--tile-settings)); stroke-width: 2; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, .12); }
+.nav-item[data-view='home'] { --tile: var(--tile-home); }
+.nav-item[data-view='chat'] { --tile: var(--tile-chat); }
+.nav-item[data-view='accounts'] { --tile: var(--tile-accounts); }
+.nav-item[data-view='activity'] { --tile: var(--tile-activity); }
+.nav-item[data-view='jobs'] { --tile: var(--tile-jobs); }
+.nav-item[data-view='digest'] { --tile: var(--tile-digest); }
+.nav-item[data-view='sessions'] { --tile: var(--tile-sessions); }
 .nav-item:hover { background: var(--fill); }
-.nav-item.is-active, .nav-item[aria-current='page'] { color: var(--ink); background: var(--fill-hover); font-weight: 600; }
+.nav-item.is-active, .nav-item[aria-current='page'] { color: var(--accent-ink); background: var(--accent); font-weight: 600; }
 
 .conversation-section { display: flex; flex: 1; flex-direction: column; min-height: 0; margin-top: 22px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 10px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
@@ -57,7 +64,7 @@
 .breadcrumb-divider { color: var(--line-strong); }
 .topbar h1 { overflow: hidden; margin: 0; font-family: var(--font-ui); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .content-frame { display: flex; flex: 1; min-height: 0; }
-.main-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; scroll-padding-top: 88px; }
+.main-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; scroll-padding-top: 88px; background: radial-gradient(1100px 380px at 50% -120px, var(--accent-soft), transparent 70%) no-repeat, var(--canvas); }
 .chat-view { display: flex; flex-direction: column; min-height: 100%; height: 100%; }
 .messages { flex: 1; overflow: auto; width: 100%; padding: 28px max(24px, calc((100% - 760px) / 2)); }
 .chat-welcome { display: flex; flex-direction: column; align-items: center; flex: 1; justify-content: center; width: 100%; max-width: 620px; margin: auto; padding: 34px 20px 25px; text-align: center; }
@@ -75,3 +82,9 @@
 .page-heading > p:last-child { margin: 0; color: var(--ink-muted); font-size: 15px; line-height: 1.4; }
 .page-list { display: grid; gap: 12px; }
 .mobile-menu, .sidebar-close { display: none; }
+.nav-group-label { margin: 14px 10px 4px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
+.nav-group-label:first-child { margin-top: 0; }
+.nav-item[data-view='models'] { --tile: var(--tile-models); }
+/* With the grouped nav, short windows scroll the sidebar instead of overlapping. */
+.sidebar { overflow-y: auto; overscroll-behavior: contain; }
+.conversation-section { min-height: 140px; }

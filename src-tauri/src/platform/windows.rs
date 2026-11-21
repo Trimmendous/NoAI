@@ -75,3 +75,14 @@ pub fn start_user_service() {}
 pub fn managed_by_service() -> bool {
     false
 }
+
+/// Opens a web link in the user's default browser without going through a shell.
+pub fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+}

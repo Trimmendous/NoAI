@@ -94,6 +94,8 @@ export async function createScheduledTask(input) {
 export async function cancelScheduledTask(id) {
   return invoke('cancel_scheduled_task', { id });
 }
+export async function pauseScheduledTask(id) { return invoke('pause_scheduled_task', { id }); }
+export async function resumeScheduledTask(id) { return invoke('resume_scheduled_task', { id }); }
 export async function getScheduledTaskRuns(id) {
   return isNative() ? invoke('get_scheduled_task_runs', { id }) : [];
 }
@@ -113,6 +115,8 @@ export async function getLocalSession(id, offset = 0) { return invoke('get_local
 export async function editScheduledTask(id, input, expectedLastRunId) { return invoke('edit_scheduled_task', {id, input, expectedLastRunId}); }
 
 export async function retryScheduledTask(id, startAt, expectedLastRunId) { return invoke('retry_scheduled_task', {id, startAt, expectedLastRunId}); }
+
+export async function openWebLink(url) { if (isNative()) return invoke('open_web_link', { url }); window.open(url, '_blank', 'noopener'); }
 
 export async function getDigest() { return isNative() ? invoke('get_digest') : { task: null, runs: [] }; }
 export async function setDigest(input) { return invoke('set_digest', { input }); }

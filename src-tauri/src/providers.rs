@@ -77,7 +77,11 @@ pub async fn refresh_account_fingerprint(harness: &str) -> Option<String> {
     identity
 }
 
-pub(crate) fn unavailable(id: &'static str, label: &'static str, detail: &str) -> ProviderUsageSnapshot {
+pub(crate) fn unavailable(
+    id: &'static str,
+    label: &'static str,
+    detail: &str,
+) -> ProviderUsageSnapshot {
     ProviderUsageSnapshot {
         id,
         label,
@@ -93,7 +97,9 @@ pub(crate) fn unavailable(id: &'static str, label: &'static str, detail: &str) -
 
 /// Only fresh, explicitly exhausted provider windows can postpone a due retry.
 pub async fn refresh_timed_limit_reset(harness: &str, now_epoch: u64) -> Option<u64> {
-    crate::harness::get(harness)?.exhausted_reset(now_epoch).await
+    crate::harness::get(harness)?
+        .exhausted_reset(now_epoch)
+        .await
 }
 
 #[tauri::command]
@@ -130,31 +136,52 @@ pub async fn get_provider_usage() -> Vec<ProviderUsageSnapshot> {
     snapshots
 }
 
-
-
-
 #[derive(Serialize)]
 pub struct HarnessModel {
     pub(crate) id: String,
     pub(crate) label: String,
+    /// Where it was found: "agent" (the CLI listed it) or "settings" (the
+    /// user's own CLI configuration). Models seen in history are added by the UI.
+    pub(crate) source: &'static str,
+}
+
+/// The agent's own list, then models configured in its settings, without
+/// duplicates. Nothing here is a preset: an agent that reports nothing gets
+/// an empty list.
+pub fn merge_models(listed: Vec<HarnessModel>, configured: Vec<String>) -> Vec<HarnessModel> {
+    let mut models = Vec::new();
+    for model in listed
+        .into_iter()
+        .chain(configured.into_iter().map(|id| HarnessModel {
+            label: id.clone(),
+            id,
+            source: "settings",
+        }))
+    {
+        let id = model.id.trim();
+        if id.is_empty() || models.iter().any(|known: &HarnessModel| known.id == id) {
+            continue;
+        }
+        models.push(HarnessModel {
+            id: id.to_owned(),
+            ..model
+        });
+    }
+    models
 }
 
 #[tauri::command]
 pub async fn get_harness_models(harness: String) -> Vec<HarnessModel> {
     match crate::harness::get(&harness) {
-        Some(agent) => agent.models().await,
+        Some(agent) => {
+            let configured = crate::platform::home_dir()
+                .map(|home| agent.configured_models(&home))
+                .unwrap_or_default();
+            merge_models(agent.models().await, configured)
+        }
         None => vec![],
     }
 }
-
-
-
-
-
-
-
-
-
 
 async fn openrouter_usage() -> ProviderUsageSnapshot {
     let Ok(key) = env::var("OPENROUTER_API_KEY") else {
@@ -254,9 +281,22 @@ fn openrouter_snapshot(payload: &Value) -> ProviderUsageSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merged_models_keep_agent_entries_first_and_drop_duplicates() {
+        let listed = vec![HarnessModel {
+            id: "opus".into(),
+            label: "Opus (latest)".into(),
+            source: "agent",
+        }];
+        let merged = merge_models(listed, vec!["opus".into(), " my-model ".into(), "".into()]);
+        let ids: Vec<_> = merged
+            .iter()
+            .map(|model| (model.id.as_str(), model.source))
+            .collect();
+        assert_eq!(ids, [("opus", "agent"), ("my-model", "settings")]);
+    }
     use serde_json::json;
-
-
 
     #[test]
     fn openrouter_does_not_invent_reset_time_or_a_limit() {

@@ -101,12 +101,20 @@ pub fn edit_scheduled_task(
 }
 
 #[tauri::command]
+pub fn open_web_link(url: String) -> Result<(), String> {
+    crate::platform::open_web_link(&url)
+}
+
+#[tauri::command]
 pub fn get_digest(app: AppHandle) -> Result<Value, String> {
     ipc::request(&app, json!({"command":"get_digest"}))
 }
 
 #[tauri::command]
-pub fn set_digest(app: AppHandle, input: crate::scheduled_tasks::DigestInput) -> Result<Task, String> {
+pub fn set_digest(
+    app: AppHandle,
+    input: crate::scheduled_tasks::DigestInput,
+) -> Result<Task, String> {
     ipc::request(&app, json!({"command":"set_digest", "input":input}))
 }
 
@@ -131,6 +139,16 @@ pub fn retry_scheduled_task(
 #[tauri::command]
 pub fn cancel_scheduled_task(app: AppHandle, id: String) -> Result<(), String> {
     ipc::request(&app, json!({"command":"cancel", "id":id}))
+}
+
+#[tauri::command]
+pub fn pause_scheduled_task(app: AppHandle, id: String) -> Result<Task, String> {
+    ipc::request(&app, json!({"command":"pause", "id":id}))
+}
+
+#[tauri::command]
+pub fn resume_scheduled_task(app: AppHandle, id: String) -> Result<Task, String> {
+    ipc::request(&app, json!({"command":"resume", "id":id}))
 }
 
 #[tauri::command]

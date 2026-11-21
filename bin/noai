@@ -18,6 +18,8 @@ Usage:
       [--dangerously-bypass-permissions true|false]
       [--dry-run true|false] [--format json|text (dry run only)]
   noai jobs cancel ID
+  noai jobs pause ID
+  noai jobs resume ID
   noai jobs runs ID
   noai jobs retry ID [--at ISO-8601]
   noai jobs update-auto-resume ID true|false
@@ -97,7 +99,7 @@ export function parse(argv) {
     if (args.length) fail('jobs list takes no arguments');
     return { socketPath, request: { command: 'list' } };
   }
-  if (command === 'cancel' || command === 'runs') {
+  if (command === 'cancel' || command === 'runs' || command === 'pause' || command === 'resume') {
     if (args.length !== 1 || !args[0] || args[0].startsWith('--')) fail(`jobs ${command} requires one task ID`);
     return { socketPath, request: { command, id: args[0] } };
   }

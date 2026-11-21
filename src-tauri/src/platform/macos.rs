@@ -39,3 +39,14 @@ pub fn start_user_service() {
 pub fn managed_by_service() -> bool {
     std::env::var("XPC_SERVICE_NAME").is_ok_and(|name| name == super::LAUNCHD_LABEL)
 }
+
+/// Opens a web link in the user's default browser.
+pub fn open_url(url: &str) -> std::io::Result<()> {
+    Command::new("open")
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+}

@@ -1,7 +1,9 @@
 export const WORKSPACE_VERSION = 1;
 
 const THEMES = new Set(['system', 'light', 'dark']);
-const PALETTES = new Set(['graphite', 'sage', 'blue', 'amber']);
+const PALETTES = new Set(['graphite', 'sage', 'blue', 'purple', 'amber']);
+// Version 2 made blue the default. Grey from before then was the old default, not a choice.
+const PALETTE_VERSION = 2;
 const ROLES = new Set(['user', 'assistant', 'system']);
 import { HARNESS_ID } from './catalog.js';
 const SAVED_STATUSES = new Set(['complete', 'error', 'interrupted']);
@@ -44,7 +46,7 @@ export function createInitialWorkspace() {
     conversations: [],
     activeConversationId: null,
     projectPath: null,
-    preferences: { theme: 'system', palette: 'graphite', customModels: {}, autoResume: true, backgroundMode: true, manualPlans: {} },
+    preferences: { theme: 'system', palette: 'blue', paletteVersion: PALETTE_VERSION, customModels: {}, autoResume: true, backgroundMode: true, manualPlans: {} },
   };
 }
 
@@ -110,7 +112,8 @@ export function normalizeWorkspace(raw) {
     projectPath: nullableText(input.projectPath),
     preferences: {
       theme: THEMES.has(preferences.theme) ? preferences.theme : initial.preferences.theme,
-      palette: PALETTES.has(preferences.palette) ? preferences.palette : initial.preferences.palette,
+      palette: PALETTES.has(preferences.palette) && !(preferences.palette === 'graphite' && preferences.paletteVersion !== PALETTE_VERSION) ? preferences.palette : initial.preferences.palette,
+      paletteVersion: PALETTE_VERSION,
       autoResume: preferences.autoResume !== false,
       backgroundMode: preferences.backgroundMode !== false,
       manualPlans: Object.fromEntries(Object.entries(object(preferences.manualPlans)).filter(([key, value]) => /^[a-z]+$/.test(key) && typeof value === 'string').map(([key, value]) => [key, value.slice(0, 80)])),

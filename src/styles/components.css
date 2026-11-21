@@ -62,15 +62,10 @@
 .message.role-user .message-header { display: none; }
 .message.role-user .message-content { max-width: 85%; padding: 10px 15px; border-radius: 18px 18px 5px 18px; color: var(--accent-ink); background: var(--accent); }
 .message.role-system .message-content { padding: 10px 14px; border-radius: var(--radius-md); color: var(--ink-soft); background: var(--fill); font-size: 13px; }
-.message-content code, .message-content pre { font-family: var(--font-mono); font-size: .9em; }
-.message-content pre { overflow-x: auto; max-width: 100%; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--card-shadow); white-space: pre; }
 .message-avatar { display: none; }
 .message-status { display: block; margin: 6px 2px 0; color: var(--ink-muted); font-size: 12px; }
 .message-status:empty { display: none; }
 .message-prose { white-space: pre-wrap; }
-.code-block { margin: 12px 0 2px; white-space: normal; border-radius: var(--radius-md); overflow: hidden; background: var(--surface); box-shadow: var(--card-shadow); }
-.code-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px 6px 14px; color: var(--ink-muted); background: var(--surface-subtle); font-size: 11px; }
-.code-block pre { margin: 0; border-radius: 0; box-shadow: none; }
 .notice { padding: 12px 16px; border: 0; border-radius: var(--radius-md); color: var(--ink-soft); background: var(--surface); box-shadow: var(--card-shadow); font-size: 13px; line-height: 1.5; }
 
 /* Details panel. */
@@ -168,16 +163,16 @@
 .setting-toggle small { color: var(--ink-muted); font-size: 12px; line-height: 1.4; }
 
 /* Checkboxes that switch something on or off are drawn as iOS-style switches. */
-.setting-toggle input[type='checkbox'], .scheduled-auto-resume input[type='checkbox'] {
+.setting-toggle input[type='checkbox'], .scheduled-auto-resume input[type='checkbox'], input.ui-switch {
   position: relative; flex: none; width: 38px; height: 22px; margin: 0; appearance: none; -webkit-appearance: none;
   border-radius: var(--radius-pill); background: var(--fill-hover); cursor: pointer; transition: background-color .2s var(--ease);
 }
-.setting-toggle input[type='checkbox']::after, .scheduled-auto-resume input[type='checkbox']::after {
+.setting-toggle input[type='checkbox']::after, .scheduled-auto-resume input[type='checkbox']::after, input.ui-switch::after {
   position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, .25), 0 0 0 .5px rgba(0, 0, 0, .04); content: ''; transition: transform .2s var(--ease);
 }
-.setting-toggle input[type='checkbox']:checked, .scheduled-auto-resume input[type='checkbox']:checked { background: var(--success); }
-.setting-toggle input[type='checkbox']:checked::after, .scheduled-auto-resume input[type='checkbox']:checked::after { transform: translateX(16px); }
+.setting-toggle input[type='checkbox']:checked, .scheduled-auto-resume input[type='checkbox']:checked, input.ui-switch:checked { background: var(--success); }
+.setting-toggle input[type='checkbox']:checked::after, .scheduled-auto-resume input[type='checkbox']:checked::after, input.ui-switch:checked::after { transform: translateX(16px); }
 
 .segmented-options { display: flex; width: fit-content; gap: 2px; padding: 2px; border: 0; border-radius: 9px; background: var(--fill); }
 .segmented-options label, .palette-options label { position: relative; cursor: pointer; }
@@ -195,6 +190,7 @@
 .palette-graphite { background: var(--palette-graphite); }
 .palette-blue { background: var(--palette-blue); }
 .palette-amber { background: var(--palette-amber); }
+.palette-purple { background: var(--palette-purple); }
 
 /* Form fields. */
 .field-label { display: block; margin-bottom: -14px; font-size: 13px; font-weight: 500; }
@@ -217,7 +213,7 @@
 .permission-badge { color: var(--error); }
 
 /* Pop-up menus: one rounded field with a small up/down chevron, like macOS. */
-select.text-field, .scheduled-field select, .metrics-controls select, .sessions-toolbar select {
+select.text-field, select.ui-popup, .scheduled-field select, .metrics-controls select, .sessions-toolbar select {
   appearance: none; -webkit-appearance: none; padding-right: 30px; text-overflow: ellipsis; cursor: pointer;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14' fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 5l3-3 3 3M2 9l3 3 3-3'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 10px center; background-size: 9px 13px;

@@ -95,7 +95,9 @@ pub struct SessionUsage {
 
 impl SessionUsage {
     pub fn tokens(&self) -> Tokens {
-        self.calls.values().fold(Tokens::default(), |sum, call| sum.add(*call))
+        self.calls
+            .values()
+            .fold(Tokens::default(), |sum, call| sum.add(*call))
     }
 }
 
@@ -122,7 +124,13 @@ pub trait Harness: Send + Sync {
         false
     }
 
+    /// Models the CLI itself reports. Never a hardcoded list.
     fn models(&self) -> BoxFuture<Vec<HarnessModel>>;
+    /// Model IDs the user configured for this CLI (settings files, env vars),
+    /// including custom or proxied ones the CLI doesn't list.
+    fn configured_models(&self, _home: &Path) -> Vec<String> {
+        Vec::new()
+    }
     fn usage(&self) -> BoxFuture<ProviderUsageSnapshot>;
     /// Stable signed-in account identity, never a credential.
     fn identity(&self) -> BoxFuture<Option<String>>;
@@ -183,8 +191,14 @@ pub fn token_event(
 ) -> Option<RunEvent> {
     let input = counts.get(keys.input)?.as_u64()?;
     let output = counts.get(keys.output)?.as_u64()?;
-    let cached = counts.get(keys.cache_read).and_then(Value::as_u64).unwrap_or(0);
-    let written = counts.get(keys.cache_write).and_then(Value::as_u64).unwrap_or(0);
+    let cached = counts
+        .get(keys.cache_read)
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let written = counts
+        .get(keys.cache_write)
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let input = if keys.input_includes_cache {
         input.saturating_add(cached).saturating_add(written)
     } else {
@@ -256,7 +270,10 @@ mod tests {
                 .permissions()
                 .iter()
                 .any(|mode| mode.id == harness.read_only()));
-            assert_eq!(get(harness.id()).map(|found| found.id()), Some(harness.id()));
+            assert_eq!(
+                get(harness.id()).map(|found| found.id()),
+                Some(harness.id())
+            );
         }
         assert!(get("not-an-agent").is_none());
     }

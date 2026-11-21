@@ -35,6 +35,12 @@ mod unix {
         Cancel {
             id: String,
         },
+        Pause {
+            id: String,
+        },
+        Resume {
+            id: String,
+        },
         Runs {
             id: String,
         },
@@ -318,6 +324,8 @@ mod unix {
                 expected_last_run_id,
             )),
             Request::Cancel { id } => result(engine::cancel_scheduled_task(engine, id)),
+            Request::Pause { id } => result(engine::pause_scheduled_task(engine, id)),
+            Request::Resume { id } => result(engine::resume_scheduled_task(engine, id)),
             Request::Runs { id } => result(engine::get_scheduled_task_runs(engine, id)),
             Request::GetDigest => json!({"ok": true, "data": engine::get_digest(engine)}),
             Request::SetDigest { input } => result(engine::set_digest(engine, input)),
