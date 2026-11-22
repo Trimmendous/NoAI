@@ -156,7 +156,7 @@ try {
   assert.equal(await chat.locator('#chat-bypass-permissions').isChecked(), false);
   assert.match(await chat.locator('#chat-bypass-description').innerText(), /Claude/);
   assert.equal(await chat.locator('#prompt-input').inputValue(), '');
-  await chat.locator('.conversation-item').first().click();
+  await chat.locator('.chat-tab-open').first().click();
   assert.equal(await chat.locator('#prompt-input').inputValue(), 'An unsent draft');
   await chat.locator('#prompt-input').fill('Wait through a timed limit');
   await chat.locator('#send-button').click();
@@ -204,7 +204,7 @@ try {
   await chat.screenshot({ path: '/tmp/noai-check/conversation.png', fullPage: true });
   await chat.locator('#delete-chat').click();
   await chat.locator('#edit-confirm').click();
-  assert.equal(await chat.locator('.conversation-item').count(), 0);
+  assert.equal(await chat.locator('.chat-tab').count(), 0);
   await chat.locator('button[data-view="jobs"]').click();
   await chat.locator('.scheduled-empty-state').filter({hasText:'No jobs yet'}).waitFor();
   await chat.locator('#scheduled-new-job').click();

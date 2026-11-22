@@ -144,6 +144,12 @@ mod unix {
     pub fn request<T: DeserializeOwned>(app: &AppHandle, command: Value) -> Result<T, String> {
         let path = socket_path(app)?;
         let mut stream = connect(&path)?;
+        // Publishing changes pushes to the network and can take a while.
+        if command.get("command").and_then(Value::as_str) == Some("review_change") {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(180)))
+                .map_err(|e| e.to_string())?;
+        }
         let mut bytes = serde_json::to_vec(&command).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
         stream

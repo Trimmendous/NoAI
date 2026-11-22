@@ -17,8 +17,6 @@
 @keyframes wordmark-blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .wordmark-cursor { animation: none; } }
 
-.project-picker { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; margin-top: 18px; padding: 8px 10px; text-align: left; color: var(--ink); border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--card-shadow); }
-.project-picker:hover { background: var(--surface-subtle); }
 .project-symbol { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); color: var(--accent-ink); background: var(--accent); }
 .project-symbol svg { width: 16px; height: 16px; }
 .project-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
@@ -34,21 +32,18 @@
 .nav-item[data-view='accounts'] { --tile: var(--tile-accounts); }
 .nav-item[data-view='activity'] { --tile: var(--tile-activity); }
 .nav-item[data-view='jobs'] { --tile: var(--tile-jobs); }
+.nav-item[data-view='changes'] { --tile: #34aadc; }
 .nav-item[data-view='digest'] { --tile: var(--tile-digest); }
 .nav-item[data-view='sessions'] { --tile: var(--tile-sessions); }
 .nav-item:hover { background: var(--fill); }
 .nav-item.is-active, .nav-item[aria-current='page'] { color: var(--accent-ink); background: var(--accent); font-weight: 600; }
 
-.conversation-section { display: flex; flex: 1; flex-direction: column; min-height: 0; margin-top: 22px; }
-.section-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 10px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
 .search-field { display: flex; align-items: center; gap: 6px; height: 30px; margin-top: 8px; padding: 0 9px; border: 0; border-radius: var(--radius-sm); color: var(--ink-muted); background: var(--fill); }
 .search-field:focus-within { box-shadow: 0 0 0 3px var(--focus); }
 .search-field svg { width: 14px; height: 14px; }
 .search-field input { min-width: 0; width: 100%; padding: 0; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 13px; }
 .search-field input::placeholder { color: var(--ink-muted); }
-.conversation-list { flex: 1; min-height: 0; overflow: auto; padding-top: 8px; }
-.conversation-empty { padding: 6px 10px; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
-.sidebar-bottom { flex: none; padding-top: 8px; border-top: 1px solid var(--line); }
+.sidebar-bottom { flex: none; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
 .runtime-row { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 6px 10px 0; color: var(--ink-muted); font-size: 11px; }
 .status-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--warning); }
 .runtime-row.is-ready .status-dot { background: var(--success); }
@@ -82,7 +77,6 @@
 .nav-item[data-view='models'] { --tile: var(--tile-models); }
 /* With the grouped nav, short windows scroll the sidebar instead of overlapping. */
 .sidebar { overflow-y: auto; overscroll-behavior: contain; }
-.conversation-section { min-height: 140px; }
 
 /* Big windows: the sidebar and pages grow instead of leaving empty space. */
 @media (min-width: 1440px) {
@@ -92,22 +86,5 @@
 @media (min-width: 1800px) { .page-view { width: min(100%, 1180px); } }
 
 /* Chats grouped by date. */
-.conversation-group { margin: 12px 10px 2px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
 .conversation-group:first-child { margin-top: 2px; }
 
-/* Usage limits at the bottom of the sidebar, only when there's room for them. */
-.sidebar-limits { display: grid; flex: none; gap: 10px; margin: 10px 0 8px; padding: 12px; border: 0; border-radius: var(--radius-md); color: var(--ink); background: var(--fill); text-align: left; cursor: pointer; }
-.sidebar-limits:hover { background: var(--fill-hover); }
-.sidebar-limits[hidden] { display: none; }
-.sidebar-limits-title { color: var(--ink-muted); font-size: 11px; font-weight: 600; }
-.sidebar-limit { display: grid; gap: 4px; }
-.sidebar-limit-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
-.sidebar-limit-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-limit-head strong { font-variant-numeric: tabular-nums; }
-.sidebar-limit-bar { height: 5px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-hover); }
-.sidebar-limit-bar span { display: block; height: 100%; border-radius: inherit; background: var(--success); }
-.sidebar-limit.is-warn .sidebar-limit-bar span { background: var(--warning); }
-.sidebar-limit.is-bad .sidebar-limit-bar span { background: var(--error); }
-.sidebar-limit small { color: var(--ink-muted); font-size: 11px; }
-@media (max-height: 899px) { .sidebar-limits { display: none; } }
-body.sidebar-collapsed .sidebar-limits { display: none; }

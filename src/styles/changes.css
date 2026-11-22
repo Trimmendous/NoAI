@@ -1,0 +1,37 @@
+/* Changes: jobs' worktree branches waiting for review, with a file-by-file diff. */
+.nav-badge { margin-left: auto; min-width: 18px; padding: 0 6px; border-radius: var(--radius-pill); color: #fff; background: var(--accent); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.nav-item.is-active .nav-badge { color: var(--accent); background: var(--accent-ink); }
+.nav-badge[hidden] { display: none; }
+body.sidebar-collapsed .nav-badge { display: none; }
+.changes-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin: 18px 0 12px; }
+.changes-head h3 { margin: 0; font-size: 20px; font-weight: 600; }
+.changes-head p { margin: 4px 0 0; color: var(--ink-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.changes-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.diff-files { display: grid; gap: 10px; }
+.diff-file { overflow: hidden; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--card-shadow); }
+.diff-file-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; }
+.diff-file-head::-webkit-details-marker { display: none; }
+.diff-file-head::before { color: var(--ink-muted); content: '›'; transition: transform .15s var(--ease); }
+.diff-file[open] .diff-file-head::before { transform: rotate(90deg); }
+.diff-path { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-mono); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.diff-counts { display: flex; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.diff-added { color: var(--success); }
+.diff-removed { color: var(--error); }
+.diff-lines { overflow-x: auto; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; line-height: 1.55; }
+.diff-line { display: flex; min-width: max-content; }
+.diff-line code { padding-right: 16px; white-space: pre; font-family: inherit; }
+.diff-sign { flex: none; width: 26px; color: var(--ink-muted); text-align: center; user-select: none; }
+.diff-line.is-add { background: color-mix(in srgb, var(--success) 13%, transparent); }
+.diff-line.is-add .diff-sign { color: var(--success); }
+.diff-line.is-del { background: color-mix(in srgb, var(--error) 11%, transparent); }
+.diff-line.is-del .diff-sign { color: var(--error); }
+.diff-line.is-hunk { padding: 2px 0; color: var(--ink-muted); background: var(--surface-subtle); }
+.diff-line.is-hunk .diff-sign { width: 12px; }
+.diff-line.is-note { padding: 6px 14px; color: var(--ink-muted); font-style: italic; }
+.diff-more { margin: 8px 14px; }
+
+/* Settings › Automation › Usage budget */
+.budget-control { gap: 10px; }
+.budget-control input { width: 160px; accent-color: var(--accent); }
+.budget-control output { min-width: 40px; font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+#budget-slider-row[hidden] { display: none; }

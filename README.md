@@ -7,7 +7,7 @@ It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 ## What it does
 
 - **Chat** with whichever agent you have installed. Noai finds them for you. Open several chats as tabs, split the window into as many panes as you like, or drag a chat out into its own window.
-- **Jobs**: tell an agent to do something now, later, or every day. Closing the window doesn't stop them.
+- **Jobs**: tell an agent to do something now, later, or every day. Closing the window doesn't stop them. Each job can work on its own git branch, so it never touches your working copy, and you review its changes in **Changes** (merge, open a pull request, or discard). Noai notifies you when jobs finish or need you, and a usage budget keeps part of each limit for you.
 - **Auto-resume**: if an agent hits its usage limit, Noai waits for the reset and picks up where it left off.
 - **Sessions**: every past conversation in one list, including ones you started outside Noai. Each one shows how full its context got and how many tokens it used.
 - **Dashboard and Activity**: charts of your token use, tool calls and errors over time.

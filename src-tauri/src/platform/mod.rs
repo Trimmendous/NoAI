@@ -65,6 +65,23 @@ pub fn wake_status() -> WakeStatus {
     }
 }
 
+/// Shows a system notification (Notification Center, notify-send, a Windows
+/// toast). Best effort: if the OS can't show it, nothing happens.
+pub fn notify(title: &str, body: &str) {
+    let clean = |text: &str, max: usize| -> String {
+        text.chars()
+            .filter(|c| !c.is_control())
+            .take(max)
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    };
+    let (title, body) = (clean(title, 80), clean(body, 240));
+    if !title.is_empty() {
+        os::notify(&title, &body);
+    }
+}
+
 /// Shows a folder in Finder / Files / Explorer.
 pub fn open_folder(path: &Path) -> std::io::Result<()> {
     os::open_url(&path.to_string_lossy())

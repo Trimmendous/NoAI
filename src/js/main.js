@@ -7,7 +7,6 @@ import { initTheme } from './core/theme.js';
 import { isNative, runtimeStatus, chooseProject, startRun, cancelRun, listenRunEvents, providerUsage, resumeJobs, cancelResumeJob, setBackgroundMode, harnessModels, ensureProject, listScheduledTasks, createScheduledTask, cancelScheduledTask, getScheduledTaskRuns, listenScheduledTasks, connectEvents, activeRuns, activityMetrics } from './services/bridge.js';
 import { loadInitialWorkspace, createWorkspacePersistence } from './services/workspace.js';
 import { basename, element, toast } from './components/dom.js';
-import { renderConversations } from './components/navigation.js';
 import { createMessageRenderer } from './components/messages.js';
 import { renderAccounts, renderActivity } from './components/panels.js';
 import { renderJobs, countdown } from './components/jobs.js';
@@ -19,7 +18,10 @@ import { initMatrixRain } from './components/matrix-rain.js';
 import { initWorkspace } from './components/workspace.js';
 import { initPluginHost } from './plugins/host.js';
 import { initPalette } from './components/palette.js';
-import { initPlans, windowPace, countdown as limitCountdown } from './components/plans.js';
+import { initPlans } from './components/plans.js';
+import { relativeTime } from './components/ui.js';
+import { initChanges } from './components/changes.js';
+import { getAutomation, setAutomation, listChanges, changeDiff, reviewChange } from './services/bridge.js';
 import { setPluginThemes } from './core/theme.js';
 import { normalizeMetrics, summarizeMetrics, outcomeTotals } from './core/metrics.js';
 import { listPlugins, setPluginEnabled, createExamplePlugin, openPluginsFolder, deletePlugin } from './services/bridge.js';
@@ -35,6 +37,7 @@ const native = isNative();
 const renderMessages = createMessageRenderer($('#messages'));
 let workspace = null; // chat tabs and split panes; set up once the app has loaded
 let plans = null; // Dashboard › Your plans (live limit countdowns)
+let changesPanel = null; // Changes: jobs' worktree branches waiting for review
 let pluginHost = null; // plugins (pages, commands, themes, agents); set up once the app has loaded
 // Chats torn off into their own windows, and what each was last sent.
 const detachedChats = new Map();
@@ -43,13 +46,11 @@ const activity = [];
 let runtime = { harnesses: [], platform: native ? 'desktop' : 'browser' };
 let view = 'home';
 const viewScroll = new Map();
-let search = '';
 let draft = '';
 let defaultHarness = '';
 let defaultModel = '';
 let defaultBypassPermissions = false;
 let renderedConversation;
-let sidebarSignature = '';
 let lastLook = '';
 let modelSignature = '';
 let editAction;
@@ -153,7 +154,8 @@ function setView(next) {
   if (next === 'jobs') void scheduledTasks.onShow();
   if (next === 'digest') void digestPanel.refresh();
   if (next === 'models') void modelsPanel.refresh();
-  if (next === 'settings') { void loadJobInstructions(); void loadWakeStatus(); renderPluginSettings(); }
+  if (next === 'settings') { void loadJobInstructions(); void loadWakeStatus(); void loadAutomation(); renderPluginSettings(); }
+  if (next === 'changes') void changesPanel?.show();
 }
 function selectConversation(id) {
   store.setState(state => ({ ...state, activeConversationId: id }));
@@ -227,27 +229,26 @@ async function loadModels(harness) {
 function render() {
   const state = store.getState();
   const conversation = active();
-  for (const name of ['home', 'chat', 'plugin', 'models', 'settings', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
+  for (const name of ['home', 'chat', 'changes', 'plugin', 'models', 'settings', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
   document.querySelectorAll('.nav-item[data-view]').forEach(button => {
     const selected = button.dataset.view === view || view === 'session' && button.dataset.view === 'sessions' || ['job', 'job-conversation'].includes(view) && button.dataset.view === 'jobs';
     button.classList.toggle('is-active', selected);
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#main-title').textContent = view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
+  $('#main-title').textContent = view === 'changes' ? 'Changes' : view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
   const project = conversation?.projectPath || state.projectPath;
-  $('#project-label').textContent = state.projectPath ? basename(state.projectPath) : 'Automatic workspace';
-  $('#project-label').title = state.projectPath || 'Create a UUID folder in ~/.noai when a chat starts';
+  // The chat box shows the folder this chat works in (or new chats will).
+  const chatFolder = conversation ? conversation.projectPath : state.projectPath;
+  $('#project-label').textContent = chatFolder ? basename(chatFolder) : 'Automatic workspace';
+  $('#choose-project').title = conversation
+    ? `This chat works in ${chatFolder || 'its own folder'}. Pick another folder to start a new chat there.`
+    : chatFolder ? `New chats work in ${chatFolder}` : 'Each new chat gets its own fresh folder in ~/.noai';
   $('#header-project').textContent = project ? basename(project) : 'No project';
   $('#header-project').title = project || '';
   $('#rename-chat').hidden = !conversation || view !== 'chat';
   $('#delete-chat').hidden = !conversation || view !== 'chat';
   $('#delete-chat').disabled = !!running();
-  const signature = JSON.stringify([state.activeConversationId, search, state.conversations.map(({ id, title, updatedAt, harness, projectPath }) => ({ id, title, updatedAt, harness, projectPath }))]);
-  if (signature !== sidebarSignature) {
-    renderConversations($('#conversation-list'), state, search, selectConversation, workspace?.makeDraggable);
-    sidebarSignature = signature;
-  }
   const selectedId = conversation?.id ?? null;
   if (selectedId !== renderedConversation) {
     $('#prompt-input').value = conversation?.draft || (conversation ? '' : draft);
@@ -320,7 +321,7 @@ async function refreshUsage() {
   if (checkingUsage || !native) return;
   checkingUsage = true;
   $('#refresh-accounts').disabled = true;
-  try { usage = await providerUsage(); lastUsageCheck = Date.now(); plans?.render(usage); renderSidebarLimits(); }
+  try { usage = await providerUsage(); lastUsageCheck = Date.now(); plans?.render(usage); }
   catch (error) { toast(`Could not refresh usage: ${String(error)}`, 'error'); }
   finally { checkingUsage = false; $('#refresh-accounts').disabled = false; render(); }
 }
@@ -484,25 +485,65 @@ $('#prompt-input').addEventListener('keydown', event => {
     $('#composer-form').requestSubmit();
   }
 });
-$('#new-chat').addEventListener('click', newChat);
-$('#conversation-search').addEventListener('input', event => { search = event.target.value; render(); });
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', event => { event.preventDefault(); setView(button.dataset.view); }));
 document.querySelectorAll('[data-prompt]').forEach(button => button.addEventListener('click', () => {
   $('#prompt-input').value = `${button.dataset.prompt}. `;
   setDraft($('#prompt-input').value);
   $('#prompt-input').focus();
 }));
-$('#choose-project').addEventListener('click', async () => {
-  if (!native) { toast('Choose project folders in the Noai desktop app.'); return; }
-  try {
-    const projectPath = await chooseProject();
-    if (!projectPath) return;
-    store.setState(state => ({ ...state, projectPath, activeConversationId: null }));
-    draft = '';
-    $('#prompt-input').value = '';
-    setView('chat');
-  } catch (error) { toast(String(error), 'error'); }
+// Project: the folder chats work in. A different folder starts a new chat there.
+function useFolder(projectPath) {
+  store.setState(state => ({ ...state, projectPath, activeConversationId: null }));
+  draft = '';
+  $('#prompt-input').value = '';
+  setView('chat');
+  $('#prompt-input').focus();
+}
+function closeProjectMenu() {
+  $('#project-menu').hidden = true;
+  $('#choose-project').setAttribute('aria-expanded', 'false');
+}
+function openProjectMenu() {
+  const state = store.getState();
+  const current = active()?.projectPath ?? state.projectPath ?? null;
+  const item = (label, detail, chosen, action) => {
+    const button = element('button', `project-menu-item${chosen ? ' is-chosen' : ''}`);
+    button.type = 'button';
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', String(chosen));
+    button.append(element('span', 'project-menu-check', chosen ? '✓' : ''), element('span', 'project-menu-copy'));
+    button.lastChild.append(element('strong', '', label), element('small', '', detail));
+    button.addEventListener('click', () => { closeProjectMenu(); action(); });
+    return button;
+  };
+  const recent = [...new Set([...state.conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(item => item.projectPath).filter(path => path && !path.includes('/.noai/')))].slice(0, 5);
+  const menu = $('#project-menu');
+  menu.replaceChildren(
+    item('Choose a folder…', 'Work in one of your projects', false, async () => {
+      if (!native) { toast('Choose project folders in the Noai desktop app.'); return; }
+      try { const path = await chooseProject(); if (path) useFolder(path); } catch (error) { toast(String(error), 'error'); }
+    }),
+    item('Automatic workspace', 'A fresh, empty folder for each chat', !current || current.includes('/.noai/'), () => useFolder(null)),
+    ...(recent.length ? [element('p', 'project-menu-label', 'Recent')] : []),
+    ...recent.map(path => item(basename(path), path, path === current, () => useFolder(path))),
+  );
+  menu.hidden = false;
+  $('#choose-project').setAttribute('aria-expanded', 'true');
+  // Placed in the window, not the pane, so narrow panes and small windows never cut it off:
+  // above the pill when there's room, otherwise below, and nudged to stay on screen.
+  const pill = $('#choose-project').getBoundingClientRect(), box = menu.getBoundingClientRect();
+  const left = Math.max(12, Math.min(pill.left, innerWidth - box.width - 12));
+  const above = pill.top - box.height - 8 >= 12;
+  menu.style.setProperty('left', `${left}px`);
+  menu.style.setProperty('top', `${above ? pill.top - box.height - 8 : Math.min(pill.bottom + 8, innerHeight - box.height - 12)}px`);
+}
+addEventListener('resize', () => closeProjectMenu());
+$('#choose-project').addEventListener('click', event => {
+  event.stopPropagation();
+  if ($('#project-menu').hidden) openProjectMenu(); else closeProjectMenu();
 });
+document.addEventListener('click', event => { if (!event.target.closest?.('.project-menu-wrap')) closeProjectMenu(); });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('#project-menu').hidden) closeProjectMenu(); });
 $('#chat-bypass-permissions').addEventListener('change', event => {
   const enabled = event.target.checked;
   const conversation = active();
@@ -662,6 +703,41 @@ $('#wake-setting').addEventListener('change', async event => {
   }
 });
 
+// Notifications and the usage budget, kept by the background service.
+let automation = null;
+function showAutomation() {
+  if (!automation) return;
+  $('#notify-finished').checked = automation.notifyFinished;
+  $('#notify-problems').checked = automation.notifyProblems;
+  $('#notify-limits').checked = automation.notifyLimits;
+  const on = automation.reservePercent != null;
+  $('#budget-setting').checked = on;
+  $('#budget-slider-row').hidden = !on;
+  const keep = on ? automation.reservePercent : Number($('#budget-reserve').value);
+  $('#budget-reserve').value = String(keep);
+  $('#budget-value').textContent = `${keep}%`;
+  $('#budget-explain').textContent = `Jobs start only while each limit is under ${100 - keep}% used. A job that would start later waits for the limit to reset, and running jobs are never stopped.`;
+}
+async function loadAutomation() {
+  if (!native) { $('#automation-status').textContent = 'Open the desktop app to change notifications and the budget.'; return; }
+  try { automation = await getAutomation(); showAutomation(); }
+  catch (error) { $('#automation-status').textContent = `Could not load: ${String(error)}`; }
+}
+async function saveAutomation(changes) {
+  if (!automation) return;
+  const previous = automation;
+  automation = { ...automation, ...changes };
+  showAutomation();
+  try { automation = await setAutomation(automation); showAutomation(); $('#automation-status').textContent = 'Saved.'; }
+  catch (error) { automation = previous; showAutomation(); $('#automation-status').textContent = `Could not save: ${String(error)}`; }
+}
+$('#notify-finished').addEventListener('change', event => void saveAutomation({ notifyFinished: event.target.checked }));
+$('#notify-problems').addEventListener('change', event => void saveAutomation({ notifyProblems: event.target.checked }));
+$('#notify-limits').addEventListener('change', event => void saveAutomation({ notifyLimits: event.target.checked }));
+$('#budget-setting').addEventListener('change', event => void saveAutomation({ reservePercent: event.target.checked ? Number($('#budget-reserve').value) : null }));
+$('#budget-reserve').addEventListener('input', event => { $('#budget-value').textContent = `${event.target.value}%`; });
+$('#budget-reserve').addEventListener('change', event => void saveAutomation({ reservePercent: Number(event.target.value) }));
+
 // Standing instructions for every job run, kept by the background service.
 let instructionsLoaded = false;
 async function loadJobInstructions() {
@@ -748,29 +824,6 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) void persistence.flush().catch(() => {}); });
 
-// Sidebar: a compact view of each plan's limits, filling the space tall windows leave.
-function renderSidebarLimits() {
-  const panel = $('#sidebar-limits');
-  const now = Date.now() / 1000;
-  const items = usage.flatMap(snapshot => (snapshot.windows || []).filter(window => window.usedPercent != null).slice(0, 2).map(window => ({ snapshot, window })));
-  panel.hidden = !items.length;
-  if (!items.length) return;
-  const rows = items.map(({ snapshot, window }) => {
-    const pace = windowPace(window, now);
-    const row = element('span', `sidebar-limit${pace.used >= 90 ? ' is-bad' : pace.used >= 75 ? ' is-warn' : ''}`);
-    const head = element('span', 'sidebar-limit-head');
-    head.append(element('span', '', `${snapshot.label.replace(/ Code$/, '')} · ${window.label.replace(/ limit$/i, '')}`), element('strong', '', `${Math.round(pace.used)}%`));
-    const bar = element('span', 'sidebar-limit-bar'), fill = element('span');
-    fill.style.setProperty('width', `${pace.used}%`);
-    bar.append(fill);
-    row.append(head, bar);
-    if (pace.left !== null) row.append(element('small', '', pace.left > 0 ? `Resets in ${limitCountdown(pace.left).replace(/ \d+s$/, '')}` : 'Resetting…'));
-    return row;
-  });
-  panel.replaceChildren(element('span', 'sidebar-limits-title', 'Usage limits'), ...rows);
-}
-$('#sidebar-limits').addEventListener('click', () => setView('home'));
-setInterval(() => { if (!document.hidden) renderSidebarLimits(); }, 30000);
 
 plans = initPlans($('#plans-overview'), { onReset: () => void refreshUsage(), openAccounts: () => setView('accounts') });
 plans.render(usage);
@@ -794,6 +847,7 @@ function drawPluginThemes(themes) {
     bars[2].style.setProperty('background', colors['--surface'] || '#444');
     preview.append(...bars);
     label.append(input, preview, element('span', 'theme-choice-name', plugin.name));
+    if (plugin.subtitle) label.append(element('small', 'theme-choice-subtitle', plugin.subtitle));
     $('#theme-options').append(label);
   }
   showThemePage();
@@ -886,6 +940,9 @@ const palette = initPalette({
   dialog: $('#palette-dialog'), input: $('#palette-input'), list: $('#palette-list'),
   getCommands: () => [
     { key: 'new-chat', title: 'New chat', hint: '⌘N', run: newChat },
+    // Chats are opened from here, the tabs, or Sessions; the sidebar has no list.
+    ...[...store.getState().conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 30)
+      .map(item => ({ key: `chat-${item.id}`, title: item.title || 'Untitled chat', hint: `Chat · ${relativeTime(Date.parse(item.updatedAt) / 1000)}`, run: () => selectConversation(item.id) })),
     ...[['home', 'Dashboard'], ['chat', 'Chat'], ['jobs', 'Jobs'], ['digest', 'Digest'], ['sessions', 'Sessions'], ['activity', 'Activity'], ['accounts', 'Accounts'], ['models', 'Models'], ['settings', 'Settings']]
       .map(([id, title]) => ({ key: `go-${id}`, title: `Go to ${title}`, run: () => setView(id) })),
     { key: 'split-right', title: 'Split chat right', hint: '⌘D', run: () => { setView('chat'); workspace?.splitFocused('right'); } },
@@ -901,6 +958,7 @@ const palette = initPalette({
 });
 document.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.open(); }
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); newChat(); }
 });
 
 // ---- Chats in their own windows --------------------------------------------
@@ -961,7 +1019,6 @@ workspace = initWorkspace({
   onFocus: id => { store.setState(state => ({ ...state, activeConversationId: id })); if (view !== 'chat') setView('chat'); },
   onNewChat: newChat,
 });
-sidebarSignature = '';
 
 render();
 try { await listenRunEvents(onRunEvent); }
@@ -970,6 +1027,14 @@ await refreshRuntime();
 try { await setBackgroundMode(store.getState().preferences.backgroundMode); }
 catch (error) { toast(`Background mode is unavailable: ${String(error)}`, 'error'); }
 await refreshJobs();
+// Changes: the page, and the count next to it in the sidebar.
+changesPanel = initChanges({
+  native, list: listChanges, diff: changeDiff, review: reviewChange, openLink: openWebLink, toast,
+  onCount: count => { $('#changes-badge').hidden = !count; $('#changes-badge').textContent = String(count); },
+});
+$('#changes-refresh').addEventListener('click', () => void changesPanel.refresh());
+void changesPanel.refresh();
+
 // Plugins hear when a job's run finishes ("job.finished").
 const jobRunsSeen = new Map();
 function noteJobForPlugins(task) {
@@ -981,7 +1046,8 @@ function noteJobForPlugins(task) {
 }
 try { (await listScheduledTasks()).forEach(task => { if (task.lastRunId) jobRunsSeen.set(task.id, task.lastRunId); }); } catch { /* jobs unavailable */ }
 try { await listenScheduledTasks(task => {
-  noteJobForPlugins(task); if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
+  noteJobForPlugins(task);
+  void changesPanel?.refresh(); if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
 catch (error) { toast(`Job updates are unavailable: ${String(error)}`, 'error'); }
 try {
   for (const item of await activeRuns()) {

@@ -50,7 +50,9 @@ Pages and the background script (`main`) run in sandboxed frames served from `no
 <script src="../_sdk/noai.js"></script>
 ```
 
-The background script gets the SDK automatically. Inside any of them:
+The background script gets the SDK automatically.
+
+Each page is one document. The SDK gets a private connection to Noai once, when the page first loads it. If the frame then loads any other page, by following a link, submitting a form or being redirected, Noai cuts it off and reloads your page. A page that keeps doing this is stopped. Switch views inside the page instead of navigating to another file. Inside any of them:
 
 ```js
 await noai.chats.list()               // [{ id, title, harness, model, messageCount, running, … }]   chats:read
@@ -77,7 +79,7 @@ Each command in `commands` appears in the ⌘K palette and calls the `noai.onCom
 
 ## Themes
 
-`base` is `light` or `dark` (all of that mode's rules still apply). Add `"background": "flags/in.svg"`, a picture from your plugin's folder, and optionally `"backgroundOpacity"` (0.05–0.6, default 0.3), to show it faintly behind the whole app. Give the surfaces see-through colours (`rgba(…)`) so it shows. The World flags plugin in `examples/plugins/world-flags/` does this. `colors` overrides any of Noai's colour variables, such as `--canvas`, `--surface`, `--surface-subtle`, `--sidebar`, `--topbar`, `--ink`, `--ink-soft`, `--ink-muted`, `--line`, `--accent`, `--accent-soft` and `--accent-ink`. Values must be plain colours: no `url()`.
+An optional `subtitle` (up to 40 characters) shows under the theme's name. `base` is `light` or `dark` (all of that mode's rules still apply). Add `"background": "flags/in.svg"`, a picture from your plugin's folder, and optionally `"backgroundOpacity"` (0.05–0.6, default 0.3), to show it faintly behind the whole app. Give the surfaces see-through colours (`rgba(…)`) so it shows. The World flags plugin in `examples/plugins/world-flags/` does this. `colors` overrides any of Noai's colour variables, such as `--canvas`, `--surface`, `--surface-subtle`, `--sidebar`, `--topbar`, `--ink`, `--ink-soft`, `--ink-muted`, `--line`, `--accent`, `--accent-soft` and `--accent-ink`. Values must be plain colours: no `url()`.
 
 ## Agents
 

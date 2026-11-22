@@ -269,7 +269,8 @@ export function initWorkspace({ layoutEl, tabsEl, dock, getState, titleOf, isRun
     add.addEventListener('click', onNewChat);
     fragment.append(add);
     tabsEl.replaceChildren(fragment);
-    tabsEl.hidden = !state.tabs.length && panes(state.root).length < 2;
+    // Always shown: its + is how a new chat starts.
+    tabsEl.hidden = false;
   }
 
   /** Called on every app render: follow the active chat, then refresh each pane. */

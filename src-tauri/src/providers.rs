@@ -25,6 +25,26 @@ pub struct ProviderUsageWindow {
     /// weekly limit today, but never assumed). `None` when it isn't reported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_seconds: Option<u64>,
+    /// The saved reading is from before the window's reset time, which has
+    /// passed: nothing is used in it now until the agent is used again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expired: bool,
+}
+
+/// Readings are only taken when an agent runs, so a window can reset with no
+/// new reading. Once its reset time has passed, it counts as unused.
+pub fn expire_windows(snapshots: &mut [ProviderUsageSnapshot], now: u64) {
+    for window in snapshots
+        .iter_mut()
+        .flat_map(|snapshot| snapshot.windows.iter_mut())
+    {
+        if window.resets_at.is_some_and(|at| at <= now) {
+            window.used_percent = window.used_percent.map(|_| 0.0);
+            window.remaining = window.limit.or(window.remaining);
+            window.resets_at = None;
+            window.expired = true;
+        }
+    }
 }
 
 /// "5-hour limit", "Weekly limit", "3-day limit" from a window's length.
@@ -151,6 +171,7 @@ pub async fn get_provider_usage() -> Vec<ProviderUsageSnapshot> {
         ),
         openrouter,
     ]);
+    expire_windows(&mut snapshots, now());
     snapshots
 }
 
@@ -279,6 +300,7 @@ fn openrouter_snapshot(payload: &Value) -> ProviderUsageSnapshot {
                     Some("weekly") => Some(604_800),
                     _ => None,
                 },
+                expired: false,
             });
         }
     }
@@ -331,5 +353,47 @@ mod tests {
         assert!(openrouter_snapshot(&json!({"data":{"usage":5.0}}))
             .windows
             .is_empty());
+    }
+}
+
+#[cfg(test)]
+mod expire_tests {
+    use super::*;
+
+    #[test]
+    fn a_window_past_its_reset_counts_as_unused() {
+        let window = |used: f64, resets_at: u64| ProviderUsageWindow {
+            label: "5-hour limit".into(),
+            unit: None,
+            used_percent: Some(used),
+            remaining: None,
+            limit: None,
+            resets_at: Some(resets_at),
+            window_seconds: Some(18_000),
+            expired: false,
+        };
+        let mut snapshots = vec![ProviderUsageSnapshot {
+            id: "claude",
+            label: "Claude Code",
+            account_label: None,
+            plan: None,
+            source: "cli",
+            status: "available",
+            fetched_at: Some(0),
+            windows: vec![window(100.0, 900), window(40.0, 2_000)],
+            detail: None,
+        }];
+        expire_windows(&mut snapshots, 1_000);
+        let [past, current] = &snapshots[0].windows[..] else {
+            panic!()
+        };
+        assert_eq!(
+            (past.used_percent, past.resets_at, past.expired),
+            (Some(0.0), None, true)
+        );
+        assert_eq!(
+            (current.used_percent, current.resets_at, current.expired),
+            (Some(40.0), Some(2_000), false)
+        );
     }
 }

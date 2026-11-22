@@ -21,18 +21,13 @@
             <a class="brand" href="#home" aria-label="Noai home" data-view="home">
               <span class="wordmark" aria-hidden="true"><span class="wordmark-prompt">&gt;</span>NoA<svg class="wordmark-glyph" viewBox="-20 0 94 100" aria-hidden="true"><g transform="skewX(-11)"><rect class="wordmark-stem" x="6" y="0" width="17" height="100" /><g class="wordmark-cursor"><rect x="23" y="42" width="30" height="15" /><rect x="53" y="0" width="17" height="100" /></g></g></svg></span>
             </a>
-              <button id="version-button" class="version-button" type="button" aria-haspopup="dialog" title="What’s new">v0.0</button>
+              <button id="version-button" class="version-button" type="button" aria-haspopup="dialog" title="What’s new">v0.0.0</button>
             </div>
             <button id="sidebar-toggle" class="icon-button sidebar-close" type="button" aria-label="Close sidebar" aria-controls="sidebar" aria-expanded="true">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
             </button>
           </div>
 
-          <button id="choose-project" class="project-picker" type="button" aria-label="Choose project">
-            <span class="project-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg></span>
-            <span class="project-copy"><span class="eyebrow">Project</span><span id="project-label" class="project-name">Choose a folder</span></span>
-            <svg class="project-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 10 3 3 3-3" /></svg>
-          </button>
 
           <nav class="primary-nav" aria-label="Main">
             <p class="nav-group-label">Overview</p>
@@ -41,6 +36,7 @@
             <p class="nav-group-label">Work</p>
             <button class="nav-item is-active" type="button" data-view="chat" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 3v-14a2 2 0 0 1 2-2z" /><path d="M8 10h8M8 14h5" /></svg><span>Chat</span></button>
             <button class="nav-item" type="button" data-view="jobs"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4m8-4v4M4 10h16m-12 5h3m2 0h3" /></svg><span>Jobs</span></button>
+            <button class="nav-item" type="button" data-view="changes"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="12" r="2.5" /><path d="M6 8.5v7M8.3 6.8Q15 7 17 10" /></svg><span>Changes</span><b id="changes-badge" class="nav-badge" hidden></b></button>
             <button class="nav-item" type="button" data-view="digest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 0 2 0V8" /><path d="M5 4v14a2 2 0 0 0 2 2h12" /><path d="M8 8h6M8 12h6M8 16h4" /></svg><span>Digest</span></button>
             <button class="nav-item" type="button" data-view="sessions"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M9 9v11" /></svg><span>Sessions</span></button>
             <p class="nav-group-label">Setup</p>
@@ -49,13 +45,6 @@
           </nav>
         </div>
 
-        <div class="conversation-section">
-          <div class="section-heading"><span>Conversations</span><button id="new-chat" class="icon-button new-chat-button" type="button" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div>
-          <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" /><path d="m15 15 5 5" /></svg><span class="sr-only">Search conversations</span><input id="conversation-search" type="search" placeholder="Search conversations" autocomplete="off" /></label>
-          <div id="conversation-list" class="conversation-list" aria-label="Conversations"><p class="conversation-empty">Your conversations will appear here.</p></div>
-        </div>
-
-        <button id="sidebar-limits" class="sidebar-limits" type="button" title="Usage limits · open the Dashboard" hidden></button>
         <div class="sidebar-bottom">
           <button id="open-settings" class="nav-item settings-trigger" type="button" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg><span>Settings</span></button>
           <div class="runtime-row"><span class="status-dot" aria-hidden="true"></span><span id="runtime-label">Connecting to local runtime…</span></div>
@@ -100,6 +89,7 @@
                   <label class="permission-control"><input id="chat-bypass-permissions" type="checkbox" /><span><strong id="chat-bypass-label">Dangerously bypass permissions</strong><small id="chat-bypass-description">Allow agent tools to run without approval.</small></span></label>
                   <div class="composer-toolbar">
                     <div class="composer-selects">
+                      <div class="project-menu-wrap"><button id="choose-project" class="project-pill" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="project-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg><span id="project-label">Automatic workspace</span></button><div id="project-menu" class="project-menu" role="menu" hidden></div></div>
                       <label class="select-wrap"><span class="sr-only">Coding agent</span><select id="harness-select" aria-label="Coding agent"><option value="">Choose agent</option></select></label>
                       <label class="select-wrap model-select-wrap"><span class="sr-only">Model</span><select id="model-select" aria-label="Model"><option value="">Default model</option></select></label>
                     </div>
@@ -147,6 +137,8 @@
                     <h3 id="settings-automation-title" class="settings-section-title">Automation</h3><p class="settings-section-lead">What happens when work has to wait, or when you close the window.</p>
                     <div class="ui-group"><div class="ui-list"><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Automatically resume after timed limits</span><span class="ui-row-subtitle">Continue a waiting task when its limit resets.</span></span><span class="ui-row-trailing"><input id="auto-resume-setting" class="ui-switch" type="checkbox" /></span></label><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Keep the window in the tray when closed</span><span class="ui-row-subtitle">Closing or quitting the window doesn’t stop the scheduler service.</span></span><span class="ui-row-trailing"><input id="background-mode-setting" class="ui-switch" type="checkbox" /></span></label></div></div>
                   
+                    <div class="ui-group"><h4 class="ui-group-title">Notifications</h4><div class="ui-list"><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">When a job finishes</span><span class="ui-row-subtitle">Including how many files it changed and the morning digest.</span></span><span class="ui-row-trailing"><input id="notify-finished" class="ui-switch" type="checkbox" /></span></label><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">When a job needs you</span><span class="ui-row-subtitle">It failed, or it's waiting for a usage limit to reset.</span></span><span class="ui-row-trailing"><input id="notify-problems" class="ui-switch" type="checkbox" /></span></label><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">When your usage budget holds a job</span><span class="ui-row-subtitle">So you know why it didn't start.</span></span><span class="ui-row-trailing"><input id="notify-limits" class="ui-switch" type="checkbox" /></span></label></div><p class="settings-note">Shown by your system, even when the Noai window is closed.</p></div>
+                    <div class="ui-group"><h4 class="ui-group-title">Usage budget</h4><div class="ui-list"><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Save part of each limit for yourself</span><span class="ui-row-subtitle">Scheduled jobs only start while every usage limit of their agent leaves you this much.</span></span><span class="ui-row-trailing"><input id="budget-setting" class="ui-switch" type="checkbox" /></span></label><div id="budget-slider-row" class="ui-row no-leading budget-row"><span class="ui-row-copy"><label class="ui-row-title" for="budget-reserve">Keep for yourself</label><span id="budget-explain" class="ui-row-subtitle"></span></span><span class="ui-row-trailing budget-control"><input id="budget-reserve" type="range" min="10" max="90" step="5" value="50" /><output id="budget-value" for="budget-reserve">50%</output></span></div></div><p id="automation-status" class="settings-note" role="status"></p></div>
                     <div class="ui-group"><h4 class="ui-group-title">Sleep</h4><div class="ui-list">
                       <div class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Stay awake while a job runs</span><span class="ui-row-subtitle">The computer won’t go to sleep partway through a run. It can still sleep between jobs.</span></span><span class="ui-row-trailing"><span class="ui-pill is-good">Always on</span></span></div>
                       <label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Wake the computer for scheduled jobs</span><span id="wake-detail" class="ui-row-subtitle">Checking what this computer supports…</span></span><span class="ui-row-trailing"><input id="wake-setting" class="ui-switch" type="checkbox" disabled /></span></label>
@@ -154,6 +146,11 @@
                   </section>
                 </div>
               </div>
+            </section>
+
+            <section id="view-changes" class="page-view changes-view" aria-labelledby="changes-title" hidden>
+              <div class="page-heading page-heading-actions"><div><h2 id="changes-title">Changes</h2><p>What jobs changed on their own git branches, waiting for you to merge, open a pull request for, or discard.</p></div><div class="page-actions"><button id="changes-refresh" class="secondary-button" type="button">Refresh</button></div></div>
+              <div id="changes-content"></div>
             </section>
 
             <section id="view-plugin" class="page-view plugin-view" aria-label="Plugin page" hidden></section>
@@ -320,6 +317,7 @@
                 <label class="scheduled-field"><span>Job permissions</span><select id="scheduled-permissions" class="text-field"></select><small id="scheduled-permissions-description"></small></label>
                 <label class="permission-control"><input id="scheduled-bypass-permissions" type="checkbox" /><span><strong id="scheduled-bypass-label">Dangerously bypass permissions for Codex</strong><small id="scheduled-bypass-description">Skip tool approvals and the Codex sandbox.</small></span></label>
                 <label class="scheduled-auto-resume"><input id="scheduled-auto-resume" type="checkbox" /> Automatically resume if the agent hits a timed limit</label>
+                <label class="scheduled-auto-resume"><input id="scheduled-worktree" type="checkbox" checked /> Work on a separate copy (git worktree) and let me review the changes in Changes</label>
                 </div>
                 <div class="scheduled-form-actions"><span id="scheduled-form-status" role="status"></span><button id="scheduled-edit-cancel" class="secondary-button" type="button">Cancel</button><button id="scheduled-submit" class="primary-button" type="submit">Create job</button></div>
               </form>

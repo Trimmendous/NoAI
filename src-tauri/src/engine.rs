@@ -286,15 +286,38 @@ fn launch_reserved(
             } else {
                 "needs_attention"
             };
+            let automation = engine.scheduled_tasks.automation();
             if status == "waiting" {
                 let _ = engine.scheduled_tasks.waiting(id);
-            } else if let Ok(Some(task)) = engine.scheduled_tasks.finish(
-                id,
-                status,
-                terminal.text.clone().unwrap_or_else(|| "Completed".into()),
-                scheduler::now_epoch(),
-            ) {
-                engine.emit_task(task);
+                if automation.notify_problems {
+                    if let Some(task) = engine.scheduled_tasks.task_for_run(id) {
+                        crate::platform::notify(
+                            &format!("Job waiting: {}", task.title),
+                            "It hit a usage limit and will pick up again when the limit resets.",
+                        );
+                    }
+                }
+            } else {
+                let changes = if status == "cancelled" {
+                    None
+                } else {
+                    finish_worktree(&engine, id).await
+                };
+                if let Ok(Some(task)) = engine.scheduled_tasks.finish(
+                    id,
+                    status,
+                    terminal.text.clone().unwrap_or_else(|| "Completed".into()),
+                    scheduler::now_epoch(),
+                ) {
+                    notify_finished(
+                        &automation,
+                        &task,
+                        status,
+                        terminal.text.as_deref(),
+                        changes.as_ref(),
+                    );
+                    engine.emit_task(task);
+                }
             }
         }
         engine.active_runs.0.lock().unwrap().remove(&run_id);
@@ -1101,6 +1124,212 @@ pub fn start_scheduler(engine: Arc<Engine>) {
     });
 }
 
+/// A usage window over the budget line.
+struct BudgetHold {
+    label: String,
+    used: f64,
+    resets_at: Option<u64>,
+}
+
+/// Usage snapshots are reused for two minutes so a batch of due jobs asks once.
+static USAGE_CACHE: Mutex<Option<(u64, Vec<providers::ProviderUsageSnapshot>)>> = Mutex::new(None);
+
+async fn budget_hold(harness: &str, stop_at: f64) -> Option<BudgetHold> {
+    let now = scheduler::now_epoch();
+    let cached = USAGE_CACHE
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|(at, _)| now.saturating_sub(*at) < 120);
+    let snapshots = match cached {
+        Some((_, snapshots)) => snapshots,
+        None => {
+            let fresh = providers::get_provider_usage().await;
+            *USAGE_CACHE.lock().unwrap() = Some((now, fresh.clone()));
+            fresh
+        }
+    };
+    let snapshot = snapshots
+        .into_iter()
+        .find(|snapshot| snapshot.id == harness)?;
+    // Every limit over the line must reset before the job may start: wait for the last.
+    snapshot
+        .windows
+        .into_iter()
+        .filter(|window| window.used_percent.is_some_and(|used| used >= stop_at))
+        .map(|window| BudgetHold {
+            label: window.label,
+            used: window.used_percent.unwrap_or(100.0),
+            resets_at: window.resets_at,
+        })
+        .max_by_key(|hold| hold.resets_at.unwrap_or(u64::MAX))
+}
+
+/// Points the run at its own worktree (a resumed run continues in the last one).
+/// Not a git repository, or no commits yet: the run works in the folder as before.
+async fn prepare_worktree(engine: &Arc<Engine>, task: &Task, request: &mut RunRequest) {
+    let reuse = request
+        .resume_id
+        .is_some()
+        .then(|| engine.scheduled_tasks.resumable_worktree(&task.id))
+        .flatten()
+        .filter(|tree| std::path::Path::new(&tree.workdir).exists());
+    let tree = match reuse {
+        Some(mut tree) => {
+            tree.review = "running".into();
+            Ok(tree)
+        }
+        None => {
+            let project = std::path::PathBuf::from(&task.project_path);
+            let under =
+                crate::platform::app_data_dir().map(|dir| dir.join("worktrees").join(&task.id));
+            let (title, run_id, at) = (
+                task.title.clone(),
+                request.run_id.clone(),
+                scheduler::now_epoch(),
+            );
+            tokio::task::spawn_blocking(move || {
+                crate::worktrees::create(&project, &under?, &title, &run_id, at)
+            })
+            .await
+            .unwrap_or_else(|error| Err(error.to_string()))
+        }
+    };
+    match tree {
+        Ok(tree) => {
+            request.project_path = tree.workdir.clone();
+            let note = format!("Working on branch {} in a separate copy. Your folder isn't touched; review the changes in Changes.", tree.branch);
+            let _ = engine
+                .scheduled_tasks
+                .set_run_worktree(&request.run_id, tree);
+            let _ = engine.scheduled_tasks.append_event(
+                &request.run_id,
+                &RunEvent::new(request, "notice", Some(note)),
+            );
+        }
+        Err(error) => {
+            let note = format!("Working directly in your folder: {error}.");
+            let _ = engine.scheduled_tasks.append_event(
+                &request.run_id,
+                &RunEvent::new(request, "notice", Some(note)),
+            );
+        }
+    }
+}
+
+/// Commits a finished run's worktree and records what changed.
+async fn finish_worktree(engine: &Arc<Engine>, run_id: &str) -> Option<crate::worktrees::Worktree> {
+    let (title, mut tree) = engine
+        .scheduled_tasks
+        .run_worktree(run_id)
+        .filter(|(_, tree)| tree.review == "running")?;
+    let tree = tokio::task::spawn_blocking(move || {
+        crate::worktrees::finish(&mut tree, &format!("Noai job: {title}"));
+        tree
+    })
+    .await
+    .ok()?;
+    let _ = engine
+        .scheduled_tasks
+        .set_run_worktree(run_id, tree.clone());
+    Some(tree)
+}
+
+fn notify_finished(
+    automation: &crate::scheduled_tasks::AutomationSettings,
+    task: &Task,
+    status: &str,
+    text: Option<&str>,
+    changes: Option<&crate::worktrees::Worktree>,
+) {
+    let digest = task.kind.as_deref() == Some(crate::scheduled_tasks::DIGEST_KIND);
+    match status {
+        "completed" if automation.notify_finished => {
+            let body = match changes {
+                Some(tree) if tree.review == "pending" => format!(
+                    "{} file{} changed. Review them in Changes.",
+                    tree.files,
+                    if tree.files == 1 { "" } else { "s" }
+                ),
+                Some(_) => "Finished without changing any files.".to_owned(),
+                None if digest => "Your morning report is ready.".to_owned(),
+                None => "Finished.".to_owned(),
+            };
+            crate::platform::notify(
+                if digest {
+                    "Daily digest ready"
+                } else {
+                    &task.title
+                },
+                &body,
+            );
+        }
+        "needs_attention" | "failed" if automation.notify_problems => {
+            crate::platform::notify(
+                &format!("Job needs you: {}", task.title),
+                text.unwrap_or("The run stopped with an error."),
+            );
+        }
+        _ => {}
+    }
+}
+
+// ---- Automation settings and Changes, for the app ------------------------------
+
+pub fn get_automation(engine: Arc<Engine>) -> crate::scheduled_tasks::AutomationSettings {
+    engine.scheduled_tasks.automation()
+}
+
+pub fn set_automation(
+    engine: Arc<Engine>,
+    input: crate::scheduled_tasks::AutomationSettings,
+) -> Result<crate::scheduled_tasks::AutomationSettings, String> {
+    engine.scheduled_tasks.set_automation(input)
+}
+
+pub fn list_changes(engine: Arc<Engine>) -> Vec<serde_json::Value> {
+    engine.scheduled_tasks.changes()
+}
+
+pub fn change_diff(engine: Arc<Engine>, run_id: String) -> Result<String, String> {
+    let (_, tree) = engine
+        .scheduled_tasks
+        .run_worktree(&run_id)
+        .ok_or("No changes for that run")?;
+    crate::worktrees::diff(&tree)
+}
+
+/// Merge, publish (push and open a pull request) or discard a run's changes.
+pub fn review_change(
+    engine: Arc<Engine>,
+    run_id: String,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    let (title, mut tree) = engine
+        .scheduled_tasks
+        .run_worktree(&run_id)
+        .ok_or("No changes for that run")?;
+    if tree.review != "pending" && !(action == "discard" && tree.review == "published") {
+        return Err("These changes were already handled.".into());
+    }
+    let url = match action.as_str() {
+        "merge" => crate::worktrees::merge(&mut tree, &title).map(|_| None)?,
+        "publish" => Some(crate::worktrees::publish(&mut tree)?),
+        "discard" => {
+            crate::worktrees::discard(&mut tree);
+            None
+        }
+        _ => return Err("Unknown action".into()),
+    };
+    engine
+        .scheduled_tasks
+        .set_run_worktree(&run_id, tree.clone())?;
+    if let Some(task) = engine.scheduled_tasks.task_for_run(&run_id) {
+        engine.emit_task(task);
+    }
+    Ok(serde_json::json!({ "worktree": tree, "url": url }))
+}
+
 async fn run_scheduled_due(engine: &Arc<Engine>) {
     let claims = match engine.scheduled_tasks.claim_due(scheduler::now_epoch()) {
         Ok(claims) => claims,
@@ -1121,7 +1350,39 @@ async fn run_scheduled_due(engine: &Arc<Engine>) {
                 scheduler::now_epoch(),
             );
         }
-        engine.emit_task(task);
+        // Usage budget: hold the job until its agent's limits leave you your share.
+        let automation = engine.scheduled_tasks.automation();
+        if let Some(reserve) = automation.reserve_percent {
+            let stop_at = f64::from(100 - reserve);
+            if let Some(hold) = budget_hold(&request.harness, stop_at).await {
+                let until = hold
+                    .resets_at
+                    .unwrap_or_else(|| scheduler::now_epoch() + 1800)
+                    + 60;
+                let reason = format!(
+                    "Held by your usage budget: {} is {}% used, and jobs stop at {}%. It starts after the limit resets.",
+                    hold.label,
+                    hold.used.round(),
+                    stop_at
+                );
+                if let Ok(Some(updated)) =
+                    engine
+                        .scheduled_tasks
+                        .defer(&request.run_id, until, &reason)
+                {
+                    if automation.notify_limits {
+                        crate::platform::notify(&format!("Job held: {}", task.title), &reason);
+                    }
+                    engine.emit_task(updated);
+                }
+                continue;
+            }
+        }
+        engine.emit_task(task.clone());
+        // A separate git worktree for the run, so it never touches your working copy.
+        if task.worktree && task.kind.is_none() {
+            prepare_worktree(engine, &task, &mut request).await;
+        }
         let fingerprint = if request.auto_resume {
             providers::refresh_account_fingerprint(&request.harness).await
         } else {

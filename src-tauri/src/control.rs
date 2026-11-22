@@ -72,6 +72,18 @@ mod unix {
         GetDigest,
         GetJobInstructions,
         ReloadPlugins,
+        GetAutomation,
+        SetAutomation {
+            input: crate::scheduled_tasks::AutomationSettings,
+        },
+        ListChanges,
+        ChangeDiff {
+            run_id: String,
+        },
+        ReviewChange {
+            run_id: String,
+            action: String,
+        },
         SetJobInstructions {
             input: crate::scheduled_tasks::JobInstructions,
         },
@@ -101,6 +113,94 @@ mod unix {
         records: VecDeque<EventRecord>,
         run_ids: HashMap<String, u64>,
         log: Option<fs::File>,
+        path: Option<std::path::PathBuf>,
+        appended: u64,
+    }
+
+    /// Events newer than this are kept exactly, so the app can always catch up.
+    const KEEP_SECONDS: u64 = 7 * 86_400;
+    /// Compact again after this many new events in a long-running daemon.
+    const COMPACT_EVERY: u64 = 2_000;
+    /// Run events the Dashboard's metrics read; older ones are kept, slimmed.
+    const METRIC_KINDS: &[&str] = &["session", "usage", "activity", "done", "error", "waiting"];
+
+    /// Keeps the journal from growing forever. Recent events stay as they are.
+    /// Older run events that feed usage metrics stay, reduced to the fields
+    /// metrics read; older replies, notices and job snapshots go (the replies
+    /// live in their chats and the jobs in scheduled-tasks.json). Returns
+    /// whether anything changed.
+    fn compact(records: &mut VecDeque<EventRecord>, now: u64) -> bool {
+        let cutoff = now.saturating_sub(KEEP_SECONDS);
+        let before = records.len();
+        let mut changed = false;
+        records.retain_mut(|record| {
+            if record.at >= cutoff {
+                return true;
+            }
+            let kind = record.payload["type"].as_str().unwrap_or_default();
+            if record.channel != "noai:run" || !METRIC_KINDS.contains(&kind) {
+                return false;
+            }
+            let fields = [
+                "runId",
+                "conversationId",
+                "eventId",
+                "type",
+                "harness",
+                "model",
+                "resumeId",
+                "usage",
+                "text",
+            ];
+            let slim: serde_json::Map<String, Value> = fields
+                .iter()
+                .filter_map(|field| {
+                    let value = record.payload.get(*field)?;
+                    // Only short text matters to metrics: tool names and "Cancelled".
+                    let value = match (field, value.as_str()) {
+                        (&"text", Some(text)) => json!(text.chars().take(80).collect::<String>()),
+                        _ => value.clone(),
+                    };
+                    Some(((*field).to_owned(), value))
+                })
+                .collect();
+            let slim = Value::Object(slim);
+            if slim != record.payload {
+                record.payload = slim;
+                changed = true;
+            }
+            true
+        });
+        changed || records.len() != before
+    }
+
+    /// Rewrites the journal from `records`: a new file is written, then swapped in.
+    fn rewrite(path: &Path, records: &VecDeque<EventRecord>) -> Result<fs::File, String> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let temp = path.with_extension("jsonl.compacting");
+        let mut out = std::io::BufWriter::new(
+            fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&temp)
+                .map_err(|e| e.to_string())?,
+        );
+        for record in records {
+            let mut bytes = serde_json::to_vec(record).map_err(|e| e.to_string())?;
+            bytes.push(b'\n');
+            out.write_all(&bytes).map_err(|e| e.to_string())?;
+        }
+        let file = out.into_inner().map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        fs::rename(&temp, path).map_err(|e| e.to_string())?;
+        fs::OpenOptions::new()
+            .append(true)
+            .read(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())
     }
 
     #[derive(Default)]
@@ -150,6 +250,13 @@ mod unix {
                 buffer.records.push_back(record);
             }
             buffer.log = Some(file);
+            buffer.path = Some(path.clone());
+            if compact(&mut buffer.records, crate::scheduler::now_epoch()) {
+                match rewrite(&path, &buffer.records) {
+                    Ok(file) => buffer.log = Some(file),
+                    Err(error) => eprintln!("Noai could not compact its event journal: {error}"),
+                }
+            }
             Ok(Self(Mutex::new(buffer)))
         }
 
@@ -195,6 +302,21 @@ mod unix {
                     }
                 }
                 buffer.records.push_back(record);
+                buffer.appended += 1;
+                if buffer.appended >= COMPACT_EVERY {
+                    buffer.appended = 0;
+                    let buffer = &mut *buffer;
+                    if compact(&mut buffer.records, crate::scheduler::now_epoch()) {
+                        if let Some(path) = buffer.path.clone() {
+                            match rewrite(&path, &buffer.records) {
+                                Ok(file) => buffer.log = Some(file),
+                                Err(error) => {
+                                    eprintln!("Noai could not compact its event journal: {error}")
+                                }
+                            }
+                        }
+                    }
+                }
             })
         }
 
@@ -333,6 +455,13 @@ mod unix {
             Request::Resume { id } => result(engine::resume_scheduled_task(engine, id)),
             Request::Runs { id } => result(engine::get_scheduled_task_runs(engine, id)),
             Request::GetDigest => json!({"ok": true, "data": engine::get_digest(engine)}),
+            Request::GetAutomation => json!({"ok": true, "data": engine::get_automation(engine)}),
+            Request::SetAutomation { input } => result(engine::set_automation(engine, input)),
+            Request::ListChanges => json!({"ok": true, "data": engine::list_changes(engine)}),
+            Request::ChangeDiff { run_id } => result(engine::change_diff(engine, run_id)),
+            Request::ReviewChange { run_id, action } => {
+                result(engine::review_change(engine, run_id, action))
+            }
             Request::ReloadPlugins => {
                 crate::harness::reload_plugins();
                 json!({"ok": true, "data": null})
@@ -440,6 +569,50 @@ mod unix {
                 "Saved output"
             );
             drop(restored);
+            fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[test]
+        fn old_events_are_compacted_but_usage_history_stays() {
+            let now = crate::scheduler::now_epoch();
+            let record = |sequence: u64, at: u64, channel: &str, payload: Value| EventRecord {
+                sequence,
+                at,
+                channel: channel.into(),
+                payload,
+            };
+            let old = now - 30 * 86_400;
+            let mut records: VecDeque<_> = vec![
+                record(1, old, "noai:run", json!({"runId":"r","eventId":1,"type":"text","text":"a long reply"})),
+                record(2, old, "noai:run", json!({"runId":"r","eventId":2,"type":"usage","usage":{"kind":"tokens"},"harness":"claude","extra":"x".repeat(500)})),
+                record(3, old, "noai:scheduled-task", json!({"id":"t"})),
+                record(4, now - 60, "noai:run", json!({"runId":"s","eventId":1,"type":"text","text":"recent reply"})),
+            ]
+            .into();
+            assert!(compact(&mut records, now));
+            let kept: Vec<_> = records
+                .iter()
+                .map(|r| {
+                    (
+                        r.sequence,
+                        r.payload["type"].as_str().unwrap_or("").to_owned(),
+                    )
+                })
+                .collect();
+            assert_eq!(kept, [(2, "usage".to_owned()), (4, "text".to_owned())]);
+            assert!(
+                records[0].payload.get("extra").is_none()
+                    && records[0].payload["usage"]["kind"] == "tokens"
+            );
+            assert!(!compact(&mut records, now), "already compact");
+
+            // On disk: the file is rewritten and still loads, sequences intact.
+            let dir = std::env::temp_dir().join(format!("noai-compact-{}", std::process::id()));
+            fs::create_dir_all(&dir).unwrap();
+            drop(rewrite(&dir.join("daemon-events.jsonl"), &records).unwrap());
+            let reopened = Events::open(&dir).unwrap();
+            assert_eq!(reopened.since(0)["events"].as_array().unwrap().len(), 2);
+            assert_eq!(reopened.since(0)["cursor"], 4);
             fs::remove_dir_all(dir).unwrap();
         }
     }

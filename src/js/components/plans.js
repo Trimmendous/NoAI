@@ -71,6 +71,7 @@ export function initPlans(container, { onReset, openAccounts }) {
         row.dataset.resetsAt = window.resetsAt || '';
         row.dataset.windowSeconds = window.windowSeconds || '';
         row.dataset.used = window.usedPercent ?? '';
+        row.dataset.expired = window.expired ? '1' : '';
         const label = element('div', 'plan-window-label');
         label.append(element('span', '', window.label.replace(/ limit$/i, '')), element('strong', 'plan-used', window.usedPercent != null ? `${Math.round(window.usedPercent)}%` : '—'));
         const meter = element('div', 'plan-meter');
@@ -97,6 +98,11 @@ export function initPlans(container, { onReset, openAccounts }) {
     const now = Date.now() / 1000;
     for (const row of container.querySelectorAll('.plan-window')) {
       const window = { resetsAt: Number(row.dataset.resetsAt) || null, windowSeconds: Number(row.dataset.windowSeconds) || null, usedPercent: row.dataset.used === '' ? null : Number(row.dataset.used) };
+      // Past its reset, a window is empty until the agent is used again.
+      const expired = row.dataset.expired === '1' || (window.resetsAt && window.resetsAt <= now);
+      if (expired) { window.usedPercent = window.usedPercent == null ? null : 0; window.resetsAt = null; }
+      const usedNode = row.querySelector('.plan-used');
+      if (expired && usedNode && window.usedPercent === 0) usedNode.textContent = '0%';
       const pace = windowPace(window, now);
       const level = pace.used >= 90 ? 'is-bad' : pace.used >= 75 ? 'is-warn' : '';
       row.className = `plan-window ${level}`;
@@ -105,7 +111,11 @@ export function initPlans(container, { onReset, openAccounts }) {
       mark.hidden = pace.elapsed === null;
       if (pace.elapsed !== null) mark.style.setProperty('left', `${pace.elapsed * 100}%`);
       const countdownNode = row.querySelector('.plan-countdown');
-      if (pace.left === null) countdownNode.textContent = 'Reset time not reported';
+      if (expired) {
+        countdownNode.textContent = 'Reset · starts again with your next use';
+        const key = `${row.dataset.resetsAt}`;
+        if (row.dataset.resetsAt && !resetAsked.has(key)) { resetAsked.add(key); onReset(); }
+      } else if (pace.left === null) countdownNode.textContent = 'Reset time not reported';
       else if (pace.left <= 0) {
         countdownNode.textContent = 'Resetting now…';
         const key = `${row.dataset.resetsAt}`;

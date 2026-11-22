@@ -144,4 +144,9 @@ export async function setPluginEnabled(id, enabled) { return invoke('set_plugin_
 export async function createExamplePlugin() { return invoke('create_example_plugin'); }
 export async function deletePlugin(id) { return invoke('delete_plugin', { id }); }
 export async function openPluginsFolder() { return invoke('open_plugins_folder'); }
+export async function getAutomation() { return isNative() ? invoke('get_automation') : { notifyFinished: true, notifyProblems: true, notifyLimits: true, reservePercent: null }; }
+export async function setAutomation(input) { return invoke('set_automation', { input }); }
+export async function listChanges() { return isNative() ? invoke('list_changes') : []; }
+export async function changeDiff(runId) { return invoke('change_diff', { runId }); }
+export async function reviewChange(runId, action) { return invoke('review_change', { runId, action }); }
 export async function runDigestNow() { return invoke('run_digest_now'); }

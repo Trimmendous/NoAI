@@ -15,7 +15,7 @@ Usage:
       [--harness codex|claude] [--model MODEL] [--project DIR]
       [--at now|ISO-8601] [--every 30m|2h|1d] [--auto-resume true|false]
       [--permissions workspace-network|workspace-write|read-only|provider-default|auto-review]
-      [--dangerously-bypass-permissions true|false]
+      [--dangerously-bypass-permissions true|false] [--worktree true|false]
       [--dry-run true|false] [--format json|text (dry run only)]
   noai jobs cancel ID
   noai jobs pause ID
@@ -113,7 +113,7 @@ export function parse(argv) {
   }
   if (command !== 'create') fail(`Unknown jobs command: ${command || '(missing)'}`);
   const options = {};
-  const allowed = new Set(['--title', '--prompt', '--prompt-file', '--harness', '--model', '--project', '--at', '--every', '--auto-resume', '--dangerously-bypass-permissions', '--permissions', '--dry-run', '--format']);
+  const allowed = new Set(['--title', '--prompt', '--prompt-file', '--harness', '--model', '--project', '--at', '--every', '--auto-resume', '--dangerously-bypass-permissions', '--permissions', '--worktree', '--dry-run', '--format']);
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i];
     const value = args[i + 1];
@@ -146,6 +146,7 @@ export function parse(argv) {
     intervalSeconds: options['--every'] ? parseInterval(options['--every']) : null,
     autoResume: options['--auto-resume'] === undefined ? true : parseBoolean(options['--auto-resume'], '--auto-resume'),
     dangerouslyBypassPermissions: options['--dangerously-bypass-permissions'] === undefined ? false : parseBoolean(options['--dangerously-bypass-permissions'], '--dangerously-bypass-permissions'),
+    worktree: options['--worktree'] === undefined ? false : parseBoolean(options['--worktree'], '--worktree'),
   };
   const dryRun = options['--dry-run'] === undefined ? false : parseBoolean(options['--dry-run'], '--dry-run');
   const format = options['--format'] ?? 'json';

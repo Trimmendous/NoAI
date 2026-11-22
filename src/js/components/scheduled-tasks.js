@@ -254,6 +254,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     $('#scheduled-custom-model-label').hidden = true;
     customModelNode.required = false;
     $('#scheduled-auto-resume').checked = !!getAutoResume();
+    $('#scheduled-worktree').checked = true;
     $('#scheduled-form-title').textContent = 'New job';
     $('#scheduled-form-title').nextElementSibling.textContent = 'Each run starts a fresh conversation and saves the result.';
     submit.textContent = 'Create job'; submit.disabled = !native;
@@ -275,6 +276,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     $('#scheduled-project').value = task.projectPath || '';
     harnessNode.value = task.harness;
     $('#scheduled-auto-resume').checked = task.autoResume;
+    $('#scheduled-worktree').checked = !!task.worktree;
     $('#scheduled-bypass-permissions').checked = !!task.dangerouslyBypassPermissions;
     permissionControls(true);
     $('#scheduled-permissions').value = task.permissions || 'provider-default';
@@ -780,7 +782,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
       const enteredPath = $('#scheduled-project').value.trim();
       const projectPath = enteredPath || await ensureProject();
       if (!projectPath) throw new Error('Could not create a job folder.');
-      const input = { permissions: $('#scheduled-permissions').value, title, prompt, harness: harnessNode.value, model: (modelNode.value === '__custom__' ? customModelNode.value.trim() : modelNode.value) || null, projectPath, startAt, intervalSeconds, autoResume: $('#scheduled-auto-resume').checked, dangerouslyBypassPermissions: $('#scheduled-bypass-permissions').checked };
+      const input = { permissions: $('#scheduled-permissions').value, title, prompt, harness: harnessNode.value, model: (modelNode.value === '__custom__' ? customModelNode.value.trim() : modelNode.value) || null, projectPath, startAt, intervalSeconds, autoResume: $('#scheduled-auto-resume').checked, worktree: $('#scheduled-worktree').checked, dangerouslyBypassPermissions: $('#scheduled-bypass-permissions').checked };
       if (editTarget) await edit(editTarget.id, input, editTarget.lastRunId);
       else await create(input);
       // Run again on a stopped recurring job replaces it, so it doesn't run twice.

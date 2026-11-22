@@ -184,6 +184,49 @@ pub fn open_plugins_folder() -> Result<(), String> {
         .map_err(|error| format!("Could not open the folder: {error}"))
 }
 
+// ---- Automation (notifications, usage budget) and Changes ----------------------
+
+#[tauri::command]
+pub async fn get_automation(
+    app: AppHandle,
+) -> Result<crate::scheduled_tasks::AutomationSettings, String> {
+    off_main(move || ipc::request(&app, json!({"command":"get_automation"}))).await
+}
+
+#[tauri::command]
+pub async fn set_automation(
+    app: AppHandle,
+    input: crate::scheduled_tasks::AutomationSettings,
+) -> Result<crate::scheduled_tasks::AutomationSettings, String> {
+    off_main(move || ipc::request(&app, json!({"command":"set_automation", "input":input}))).await
+}
+
+#[tauri::command]
+pub async fn list_changes(app: AppHandle) -> Result<Vec<Value>, String> {
+    off_main(move || ipc::request(&app, json!({"command":"list_changes"}))).await
+}
+
+#[tauri::command]
+pub async fn change_diff(app: AppHandle, run_id: String) -> Result<String, String> {
+    off_main(move || ipc::request(&app, json!({"command":"change_diff", "run_id":run_id}))).await
+}
+
+/// "merge", "publish" or "discard". Publishing pushes the branch, so it can take a while.
+#[tauri::command]
+pub async fn review_change(
+    app: AppHandle,
+    run_id: String,
+    action: String,
+) -> Result<Value, String> {
+    off_main(move || {
+        ipc::request(
+            &app,
+            json!({"command":"review_change", "run_id":run_id, "action":action}),
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn open_web_link(url: String) -> Result<(), String> {
     crate::platform::open_web_link(&url)

@@ -124,8 +124,16 @@ pub fn spawn_keep_awake(program: &str, args: &[String]) -> Option<KeepAwake> {
         .map(KeepAwake)
 }
 
-/// Where Noai's one sudoers rule lives. It allows only the wake commands.
+/// Where Noai's one sudoers rule lives. It allows only the wake helper.
 pub const SUDOERS_FILE: &str = "/etc/sudoers.d/noai-wake";
+
+/// The sudoers rule for the wake helper. The rule allows the helper with any
+/// arguments; the helper itself accepts only a numeric time, so the rule never
+/// ends in a wildcard over the real wake command (where extra flags such as a
+/// second `rtcwake -m off` would run as root).
+pub fn wake_rule(user: &str, helper: &str) -> String {
+    format!("{user} ALL=(root) NOPASSWD: {helper}")
+}
 
 /// The login name, checked to be safe to write into a sudoers rule.
 pub fn user_name() -> Option<String> {
@@ -183,35 +191,96 @@ pub fn sudo_run(args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// A root shell script that checks `rule` with visudo, then installs it as
-/// Noai's sudoers file. A rule that fails the check is never installed.
-pub fn install_rule_script(rule: &str, group: &str) -> Result<String, String> {
-    if rule.contains('\'') || rule.contains('\n') {
-        return Err("Unexpected characters in the sudoers rule".into());
+/// A root shell script that installs the wake helper and its sudoers rule.
+///
+/// - The helper's folder must be owned by root and writable by nobody else, or
+///   nothing is installed (a user-writable folder would let any process swap
+///   the helper for its own root script).
+/// - The helper is written by root into root's own temp file, never copied
+///   from a file the user could change mid-install.
+/// - The rule is checked with visudo before it is installed.
+pub fn install_wake_script(
+    helper: &str,
+    body: &str,
+    rule: &str,
+    group: &str,
+) -> Result<String, String> {
+    let unsafe_text = |text: &str| text.contains('\'') || text.contains('\\');
+    if unsafe_text(rule) || rule.contains('\n') || unsafe_text(body) || unsafe_text(helper) {
+        return Err("Unexpected characters in the wake helper".into());
     }
+    let dir = std::path::Path::new(helper)
+        .parent()
+        .and_then(|dir| dir.to_str())
+        .filter(|dir| dir.starts_with('/') && *dir != "/")
+        .ok_or("The wake helper needs an absolute path")?;
+    let lines = body
+        .lines()
+        .map(|line| format!("'{line}'"))
+        .collect::<Vec<_>>()
+        .join(" ");
     Ok(format!(
-        "tmp=$(mktemp) && printf '%s\\n' '{rule}' > \"$tmp\" && visudo -cf \"$tmp\" >/dev/null && install -m 0440 -o root -g {group} \"$tmp\" {SUDOERS_FILE}; status=$?; rm -f \"$tmp\"; exit $status"
+        "dir='{dir}'; [ -d \"$dir\" ] || install -d -m 0755 -o root -g {group} \"$dir\"; \
+         [ -n \"$(find \"$dir\" -prune -user 0 ! -perm -020 ! -perm -002)\" ] || {{ echo \"$dir is writable by other users\" >&2; exit 1; }}; \
+         helper=$(mktemp) && rule=$(mktemp) && \
+         printf '%s\\n' {lines} > \"$helper\" && \
+         printf '%s\\n' '{rule}' > \"$rule\" && visudo -cf \"$rule\" >/dev/null && \
+         install -m 0755 -o root -g {group} \"$helper\" '{helper}' && \
+         install -m 0440 -o root -g {group} \"$rule\" {SUDOERS_FILE}; \
+         status=$?; rm -f \"$helper\" \"$rule\"; exit $status"
     ))
 }
 
-pub fn remove_rule_script() -> String {
-    format!("rm -f {SUDOERS_FILE}")
+/// Removes the sudoers rule (first, so nothing can use the helper) and then
+/// the helper.
+pub fn remove_wake_script(helper: &str) -> String {
+    format!("rm -f {SUDOERS_FILE} && rm -f '{helper}'")
 }
 
 #[cfg(test)]
 mod wake_tests {
     use super::*;
 
+    const BODY: &str = "#!/bin/sh\ncase \"$1\" in \"\"|*[!0-9]*) exit 64 ;; esac\necho \"ok $1\"";
+
     #[test]
-    fn sudoers_script_checks_the_rule_before_installing_it() {
-        let script = install_rule_script(
-            "me ALL=(root) NOPASSWD: /usr/bin/pmset schedule wake *",
+    fn wake_script_checks_the_folder_and_rule_before_installing() {
+        let script = install_wake_script(
+            "/usr/local/libexec/noai-wake",
+            "#!/bin/sh\nexit 0",
+            &wake_rule("me", "/usr/local/libexec/noai-wake"),
             "wheel",
         )
         .unwrap();
+        let owner = script.find("-user 0").unwrap();
         let check = script.find("visudo -cf").unwrap();
-        let install = script.find("install -m 0440").unwrap();
-        assert!(check < install && script.contains(SUDOERS_FILE));
-        assert!(install_rule_script("me' ALL", "wheel").is_err());
+        let install = script.find("install -m 0755").unwrap();
+        assert!(owner < check && check < install && script.contains(SUDOERS_FILE));
+        let parsed = Command::new("/bin/sh")
+            .args(["-n", "-c", &script])
+            .status()
+            .unwrap();
+        assert!(parsed.success(), "install script is not valid sh");
+        assert!(!wake_rule("me", "/x/noai-wake").contains('*'));
+        assert!(install_wake_script("/x/h", "it's", "me ALL", "wheel").is_err());
+        assert!(install_wake_script("h", "#!/bin/sh", "me ALL", "wheel").is_err());
+    }
+
+    /// The printf in the install script must reproduce the helper exactly.
+    #[test]
+    fn wake_script_writes_the_helper_byte_for_byte() {
+        let script = install_wake_script("/x/h", BODY, "me ALL", "wheel").unwrap();
+        let printf = script
+            .split("&& ")
+            .find(|part| part.starts_with("printf") && part.contains("$helper"))
+            .unwrap()
+            .replace("> \"$helper\"", "")
+            .trim()
+            .to_owned();
+        let out = Command::new("/bin/sh")
+            .args(["-c", &printf])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{BODY}\n"));
     }
 }

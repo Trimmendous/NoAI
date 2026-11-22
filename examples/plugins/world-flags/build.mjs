@@ -84,8 +84,8 @@ const manifest = {
   description: `Themes for ${PLACES.length} places around the world: the flag fills the background, and every colour matches it.`,
   author: 'Noai',
   permissions: [],
-  themes: PLACES.map(place => ({
-    id: place.code, name: place.name, base: 'dark',
+  themes: PLACES.map((place, index) => ({
+    id: place.code, name: place.name, subtitle: `#${index + 1} by population`, base: 'dark',
     background: `flags/${place.code}.svg`, backgroundOpacity: 0.4,
     colors: colors(place),
   })),

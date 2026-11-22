@@ -2,7 +2,6 @@
 .icon-button { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--ink-muted); background: transparent; }
 .icon-button:hover { color: var(--ink); background: var(--fill); }
 .icon-button svg { width: 17px; height: 17px; }
-.new-chat-button { width: 24px; height: 24px; }
 .danger-action:hover { color: var(--error); }
 .secondary-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 14px; border: 0; border-radius: var(--radius-pill); color: var(--ink); background: var(--fill); font-size: 13px; font-weight: 500; line-height: 1.2; white-space: nowrap; }
 .secondary-button:hover { background: var(--fill-hover); }
@@ -12,9 +11,6 @@
 .text-button:hover { background: var(--fill); }
 
 /* Sidebar conversation list. */
-.conversation-item { display: flex; flex-direction: column; gap: 2px; width: 100%; min-width: 0; margin: 1px 0; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); color: var(--ink); background: transparent; text-align: left; }
-.conversation-item:hover { background: var(--fill); }
-.conversation-item.is-active, .conversation-item[aria-current='page'] { background: var(--fill-hover); }
 .conversation-title { overflow: hidden; display: block; max-width: 100%; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-meta { display: block; overflow: hidden; max-width: 100%; color: var(--ink-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -33,7 +29,7 @@
 .starter-list svg { width: 15px; height: 15px; color: var(--ink-muted); }
 
 /* Composer. */
-.composer { overflow: hidden; border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--raised-shadow); }
+.composer { overflow: visible; border: 0; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--raised-shadow); }
 .composer:focus-within { box-shadow: 0 0 0 3px var(--focus), var(--raised-shadow); }
 .composer textarea { display: block; width: 100%; min-height: 72px; max-height: 40vh; resize: none; padding: 14px 16px 6px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 14px; line-height: 1.5; }
 .composer textarea::placeholder { color: var(--ink-muted); }
@@ -294,3 +290,25 @@ select.text-field, select.ui-popup, .scheduled-field select, .metrics-controls s
 .theme-empty { margin: 4px 0 0; color: var(--ink-muted); }
 .theme-pages { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; color: var(--ink-muted); font-size: 12px; }
 .secondary-button.is-compact { min-height: 28px; padding: 4px 12px; font-size: 12px; }
+
+/* Project: which folder the chat works in, as a pill in the chat box with a small menu. */
+.project-menu-wrap { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.project-pill { display: inline-flex; align-items: center; gap: 6px; max-width: min(190px, 100%); min-height: 28px; padding: 4px 11px 4px 9px; border: 0; border-radius: var(--radius-pill); color: var(--ink); background: var(--fill); font-size: 12px; }
+.project-pill:hover { background: var(--fill-hover); }
+.project-pill svg { flex: none; width: 14px; height: 14px; fill: none; stroke-width: 1.8; }
+.project-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-menu { position: fixed; z-index: 60; display: grid; gap: 2px; width: min(290px, calc(100vw - 24px)); padding: 6px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--raised-shadow); }
+.project-menu[hidden] { display: none; }
+.project-menu-item { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 7px 10px 7px 6px; border: 0; border-radius: var(--radius-sm); color: var(--ink); background: transparent; text-align: left; }
+.project-menu-item:hover { background: var(--fill); }
+.project-menu-check { flex: none; width: 14px; color: var(--accent); font-weight: 700; }
+.project-menu-copy { display: grid; min-width: 0; }
+.project-menu-copy strong { font-size: 12.5px; font-weight: 600; }
+.project-menu-copy small { overflow: hidden; color: var(--ink-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.project-menu-label { margin: 6px 10px 2px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
+.theme-choice-subtitle { margin-top: -5px; color: var(--ink-muted); font-size: 10.5px; font-weight: 400; }
+
+/* The chat box toolbar wraps on narrow windows and panes instead of overlapping. */
+.composer-toolbar { flex-wrap: wrap; row-gap: 6px; }
+.composer-selects { flex: 1 1 auto; flex-wrap: wrap; }
+.composer-actions { margin-left: auto; }

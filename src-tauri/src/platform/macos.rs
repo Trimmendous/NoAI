@@ -54,11 +54,29 @@ pub fn open_url(url: &str) -> std::io::Result<()> {
 // ---- Sleep and wake ----------------------------------------------------
 
 pub use super::unix::KeepAwake;
-use super::unix::{install_rule_script, remove_rule_script, sudo_allows, sudo_run, user_name};
+use super::unix::{
+    install_wake_script, remove_wake_script, sudo_allows, sudo_run, user_name, wake_rule,
+};
 
 pub const WAKE_SUPPORTED: bool = true;
 pub const WAKE_DETAIL: &str = "Noai asks macOS to wake this Mac a minute before the next job. Turning this on asks for your admin password once, so Noai can schedule wake-ups (pmset) by itself afterwards. A MacBook with its lid closed and no power may fall back asleep.";
-const PMSET: &str = "/usr/bin/pmset";
+/// The only command Noai's sudoers rule allows. It lives in a root-owned
+/// folder and accepts just `set|cancel <unix time>`.
+const WAKE_HELPER: &str = "/Library/PrivilegedHelperTools/dev.noai.wake";
+const WAKE_HELPER_BODY: &str = r#"#!/bin/sh
+# Noai wake helper: schedules or cancels one pmset wake-up. Installed by Noai;
+# its sudoers rule (/etc/sudoers.d/noai-wake) allows only this file.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+[ "$#" -eq 2 ] || exit 64
+case "$2" in ""|*[!0-9]*) exit 64 ;; esac
+[ "${#2}" -le 12 ] || exit 64
+when=$(date -r "$2" "+%m/%d/%y %H:%M:%S") || exit 65
+case "$1" in
+  set) exec /usr/bin/pmset schedule wake "$when" ;;
+  cancel) exec /usr/bin/pmset schedule cancel wake "$when" ;;
+  *) exit 64 ;;
+esac"#;
 static LAST_WAKE: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
 
 /// caffeinate holds off idle and system sleep until the agent process exits.
@@ -72,17 +90,8 @@ pub fn keep_awake(pid: u32) -> Option<KeepAwake> {
     )
 }
 
-/// pmset takes local time as "MM/dd/yy HH:mm:ss".
-fn pmset_time(at: u64) -> Option<String> {
-    use chrono::TimeZone;
-    chrono::Local
-        .timestamp_opt(at as i64, 0)
-        .single()
-        .map(|time| time.format("%m/%d/%y %H:%M:%S").to_string())
-}
-
 pub fn wake_enabled() -> bool {
-    sudo_allows(&[PMSET, "schedule", "wake", "01/01/30 00:00:00"])
+    std::path::Path::new(WAKE_HELPER).exists() && sudo_allows(&[WAKE_HELPER, "set", "1"])
 }
 
 /// Replaces the wake-up Noai scheduled last with one at `at` (or none).
@@ -91,12 +100,11 @@ pub fn set_wake(at: Option<u64>) -> Result<(), String> {
     if *last == at {
         return Ok(());
     }
-    if let Some(time) = last.take().and_then(pmset_time) {
-        let _ = sudo_run(&[PMSET, "schedule", "cancel", "wake", &time]);
+    if let Some(previous) = last.take() {
+        let _ = sudo_run(&[WAKE_HELPER, "cancel", &previous.to_string()]);
     }
     if let Some(at) = at {
-        let time = pmset_time(at).ok_or("Invalid wake time")?;
-        sudo_run(&[PMSET, "schedule", "wake", &time])?;
+        sudo_run(&[WAKE_HELPER, "set", &at.to_string()])?;
         *last = Some(at);
     }
     Ok(())
@@ -127,15 +135,13 @@ fn as_admin(script: &str, prompt: &str) -> Result<(), String> {
     }
 }
 
-/// One admin prompt installs a sudoers rule allowing only `pmset schedule
-/// wake …` and `pmset schedule cancel wake …` for this user.
+/// One admin prompt installs the wake helper and a sudoers rule allowing only
+/// that helper for this user. It also replaces the older, wildcard pmset rule.
 pub fn enable_wake() -> Result<(), String> {
     let user = user_name().ok_or("Cannot tell which user you are")?;
-    let rule = format!(
-        "{user} ALL=(root) NOPASSWD: {PMSET} schedule wake *, {PMSET} schedule cancel wake *"
-    );
+    let rule = wake_rule(&user, WAKE_HELPER);
     as_admin(
-        &install_rule_script(&rule, "wheel")?,
+        &install_wake_script(WAKE_HELPER, WAKE_HELPER_BODY, &rule, "wheel")?,
         "Noai wants to wake this Mac for scheduled jobs.",
     )?;
     if wake_enabled() {
@@ -151,7 +157,52 @@ pub fn enable_wake() -> Result<(), String> {
 pub fn disable_wake() -> Result<(), String> {
     let _ = set_wake(None);
     as_admin(
-        &remove_rule_script(),
+        &remove_wake_script(WAKE_HELPER),
         "Noai wants to stop waking this Mac for jobs.",
     )
+}
+
+/// Notification Center, through AppleScript (no extra permissions needed).
+pub fn notify(title: &str, body: &str) {
+    let quote = |text: &str| text.replace('\\', "\\\\").replace('"', "\\\"");
+    let _ = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(format!(
+            "display notification \"{}\" with title \"{}\"",
+            quote(body),
+            quote(title)
+        ))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs the helper as the current user. Every case here must be refused
+    /// before pmset is reached, so nothing is scheduled.
+    #[test]
+    fn wake_helper_refuses_anything_but_a_plain_time() {
+        let refused = [
+            vec!["set"],
+            vec!["set", "1", "extra"],
+            vec!["set", "1 -a"],
+            vec!["set", "-1"],
+            vec!["set", ""],
+            vec!["set", "1234567890123"],
+            vec!["sleep", "1"],
+            vec!["poweroff", "now"],
+        ];
+        for args in refused {
+            let status = Command::new("/bin/sh")
+                .args(["-c", WAKE_HELPER_BODY, "noai-wake"])
+                .args(&args)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(64), "{args:?} was not refused");
+        }
+    }
 }

@@ -731,6 +731,7 @@ fn limit_windows(info: &Value) -> Vec<ProviderUsageWindow> {
                 limit: None,
                 resets_at: window["resetsAt"].as_u64(),
                 window_seconds: window_seconds_from_key(key),
+                expired: false,
             })
         })
         .collect();

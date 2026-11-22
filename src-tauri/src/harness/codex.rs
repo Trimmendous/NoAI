@@ -574,6 +574,7 @@ fn codex_window(label: String, value: &Value) -> Option<ProviderUsageWindow> {
     };
     Some(ProviderUsageWindow {
         window_seconds,
+        expired: false,
         label,
         unit: None,
         used_percent: Some(percent),

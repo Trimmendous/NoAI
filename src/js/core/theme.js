@@ -17,7 +17,7 @@ export function setPluginThemes(themes) {
     // A background picture must be a file from the plugin itself (host resolves the URL).
     const background = typeof theme.backgroundUrl === 'string' && SAFE_BACKGROUND.test(theme.backgroundUrl) ? theme.backgroundUrl : '';
     const opacity = Number(theme.backgroundOpacity);
-    clean[key] = { name: String(theme.name || key).slice(0, 40), base: theme.base === 'light' ? 'light' : 'dark', colors, background, backgroundOpacity: Number.isFinite(opacity) ? Math.min(.6, Math.max(.05, opacity)) : .3 };
+    clean[key] = { name: String(theme.name || key).slice(0, 40), subtitle: typeof theme.subtitle === 'string' ? theme.subtitle.slice(0, 40) : '', base: theme.base === 'light' ? 'light' : 'dark', colors, background, backgroundOpacity: Number.isFinite(opacity) ? Math.min(.6, Math.max(.05, opacity)) : .3 };
   }
   try { globalThis.localStorage?.setItem(PLUGIN_THEMES_KEY, JSON.stringify(clean)); } catch { /* not kept */ }
   return clean;

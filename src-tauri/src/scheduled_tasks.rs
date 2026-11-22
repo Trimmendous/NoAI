@@ -48,6 +48,9 @@ pub struct CreateTaskInput {
     pub dangerously_bypass_permissions: bool,
     #[serde(default)]
     pub permissions: Option<crate::adapters::JobPermissions>,
+    /// Work on a separate git worktree and wait for review (git projects only).
+    #[serde(default)]
+    pub worktree: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -79,6 +82,9 @@ pub struct Task {
     /// whole days, so "Run now" never shifts the schedule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor_at: Option<u64>,
+    /// Each run works on its own git worktree; changes wait in Changes.
+    #[serde(default)]
+    pub worktree: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -140,6 +146,9 @@ pub struct TaskRun {
     #[serde(default)]
     pub permissions: Option<crate::adapters::JobPermissions>,
     pub events: Vec<StoredEvent>,
+    /// The run's git worktree, when the job uses one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::worktrees::Worktree>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -163,6 +172,35 @@ struct Journal {
     runs: Vec<TaskRun>,
     #[serde(default)]
     instructions: JobInstructions,
+    #[serde(default)]
+    automation: AutomationSettings,
+}
+
+/// Notifications and the usage budget, used by the background service.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationSettings {
+    #[serde(default = "default_true")]
+    pub notify_finished: bool,
+    #[serde(default = "default_true")]
+    pub notify_problems: bool,
+    #[serde(default = "default_true")]
+    pub notify_limits: bool,
+    /// Percent of each usage limit kept for you: a job only starts while every
+    /// limit of its agent is below 100 minus this. `None` means no budget.
+    #[serde(default)]
+    pub reserve_percent: Option<u8>,
+}
+
+impl Default for AutomationSettings {
+    fn default() -> Self {
+        Self {
+            notify_finished: true,
+            notify_problems: true,
+            notify_limits: true,
+            reserve_percent: None,
+        }
+    }
 }
 
 /// The user's standing instructions, added to every run of every job of
@@ -342,6 +380,7 @@ impl ScheduledTasks {
             pending_resume_id: None,
             kind: None,
             anchor_at: None,
+            worktree: input.worktree,
         };
         Ok(task)
     }
@@ -526,6 +565,110 @@ impl ScheduledTasks {
             .min()
     }
 
+    pub fn automation(&self) -> AutomationSettings {
+        self.journal.lock().unwrap().automation.clone()
+    }
+
+    pub fn set_automation(
+        &self,
+        mut input: AutomationSettings,
+    ) -> Result<AutomationSettings, String> {
+        input.reserve_percent = input.reserve_percent.map(|value| value.clamp(5, 95));
+        self.update(|journal| {
+            journal.automation = input.clone();
+            Ok(input)
+        })
+    }
+
+    /// Records (or updates) a run's worktree.
+    pub fn set_run_worktree(
+        &self,
+        run_id: &str,
+        tree: crate::worktrees::Worktree,
+    ) -> Result<(), String> {
+        self.update(|journal| {
+            let run = journal
+                .runs
+                .iter_mut()
+                .find(|run| run.run_id == run_id)
+                .ok_or("Scheduled run not found")?;
+            run.worktree = Some(tree);
+            Ok(())
+        })
+    }
+
+    /// A run's worktree and its job's title.
+    pub fn run_worktree(&self, run_id: &str) -> Option<(String, crate::worktrees::Worktree)> {
+        let journal = self.journal.lock().unwrap();
+        let run = journal.runs.iter().find(|run| run.run_id == run_id)?;
+        let title = journal
+            .tasks
+            .iter()
+            .find(|task| task.id == run.task_id)
+            .map(|task| task.title.clone())
+            .unwrap_or_default();
+        Some((title, run.worktree.clone()?))
+    }
+
+    /// The worktree a resumed run should continue in: its job's latest one still in use.
+    pub fn resumable_worktree(&self, task_id: &str) -> Option<crate::worktrees::Worktree> {
+        let journal = self.journal.lock().unwrap();
+        journal
+            .runs
+            .iter()
+            .rev()
+            .filter(|run| run.task_id == task_id)
+            .filter_map(|run| run.worktree.clone())
+            .find(|tree| tree.review == "running" || tree.review == "pending")
+    }
+
+    /// Runs whose changes wait for review (and recently handled ones), newest first.
+    pub fn changes(&self) -> Vec<serde_json::Value> {
+        let journal = self.journal.lock().unwrap();
+        journal
+            .runs
+            .iter()
+            .rev()
+            .filter(|run| run.worktree.as_ref().is_some_and(|tree| tree.review != "none"))
+            .take(200)
+            .map(|run| {
+                let task = journal.tasks.iter().find(|task| task.id == run.task_id);
+                serde_json::json!({
+                    "runId": run.run_id, "taskId": run.task_id, "title": task.map(|task| task.title.clone()).unwrap_or_default(),
+                    "harness": run.harness.clone().or_else(|| task.map(|task| task.harness.clone())), "status": run.status,
+                    "startedAt": run.started_at, "finishedAt": run.finished_at, "worktree": run.worktree,
+                })
+            })
+            .collect()
+    }
+
+    /// Takes back a claimed run that hasn't started (the usage budget held it):
+    /// the job goes back on the schedule at `until` and says why.
+    pub fn defer(&self, run_id: &str, until: u64, reason: &str) -> Result<Option<Task>, String> {
+        self.update(|journal| {
+            let Some(index) = journal.runs.iter().position(|run| run.run_id == run_id) else {
+                return Ok(None);
+            };
+            let run = journal.runs.remove(index);
+            let Some(task) = journal.tasks.iter_mut().find(|task| task.id == run.task_id) else {
+                return Ok(None);
+            };
+            if task.status != "running" || task.last_run_id.as_deref() != Some(run_id) {
+                return Ok(None);
+            }
+            task.status = "scheduled".into();
+            task.next_run_at = Some(until.max(now()));
+            task.last_run_id = journal
+                .runs
+                .iter()
+                .rev()
+                .find(|other| other.task_id == task.id)
+                .map(|other| other.run_id.clone());
+            task.last_result = Some(reason.to_owned());
+            Ok(Some(task.clone()))
+        })
+    }
+
     pub fn instructions(&self) -> JobInstructions {
         self.journal.lock().unwrap().instructions.clone()
     }
@@ -656,6 +799,7 @@ impl ScheduledTasks {
                     pending_resume_id: None,
                     kind: Some(DIGEST_KIND.into()),
                     anchor_at: Some(input.start_at),
+                    worktree: false,
                 };
                 journal.tasks.push(task.clone());
                 return Ok(task);
@@ -761,6 +905,7 @@ impl ScheduledTasks {
                     dangerously_bypass_permissions: task.dangerously_bypass_permissions,
                     permissions: task.permissions,
                     events: Vec::new(),
+                    worktree: None,
                 });
                 claims.push((task.clone(), request));
             }
@@ -897,6 +1042,7 @@ mod tests {
             auto_resume: false,
             dangerously_bypass_permissions: false,
             permissions: None,
+            worktree: false,
         };
         let task = store.create(input("old", 3600)).unwrap();
         store.pause(&task.id).unwrap();
@@ -959,6 +1105,7 @@ mod tests {
             auto_resume: false,
             dangerously_bypass_permissions: false,
             permissions: None,
+            worktree: false,
         };
         store.create(input(Some(3600))).unwrap();
         store.create(input(None)).unwrap();
@@ -1013,6 +1160,7 @@ mod tests {
                 auto_resume: true,
                 dangerously_bypass_permissions: false,
                 permissions: None,
+                worktree: false,
             })
             .unwrap();
         let paused = store.pause(&task.id).unwrap();
@@ -1183,6 +1331,7 @@ mod tests {
             auto_resume: true,
             dangerously_bypass_permissions: false,
             permissions: None,
+            worktree: false,
         };
         let task = store.create(original.clone()).unwrap();
         assert_eq!(
@@ -1357,6 +1506,7 @@ mod tests {
                 auto_resume: false,
                 dangerously_bypass_permissions: true,
                 permissions: None,
+                worktree: false,
             })
             .unwrap();
         let at = now();
@@ -1428,6 +1578,7 @@ mod tests {
                 auto_resume: false,
                 dangerously_bypass_permissions: false,
                 permissions: None,
+                worktree: false,
             })
             .unwrap();
         store.claim_due(now()).unwrap();
@@ -1458,6 +1609,7 @@ mod tests {
             auto_resume: false,
             dangerously_bypass_permissions: false,
             permissions: None,
+            worktree: false,
         };
         assert!(store.create(input).is_err());
         let task = store
@@ -1472,6 +1624,7 @@ mod tests {
                 auto_resume: false,
                 dangerously_bypass_permissions: false,
                 permissions: None,
+                worktree: false,
             })
             .unwrap();
         store.cancel(&task.id).unwrap();
@@ -1499,6 +1652,7 @@ mod tests {
                 auto_resume: true,
                 dangerously_bypass_permissions: false,
                 permissions: None,
+                worktree: false,
             })
             .unwrap();
         let claims = store.claim_due(now()).unwrap();

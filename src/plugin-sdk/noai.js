@@ -4,7 +4,14 @@
 (() => {
   const pending = new Map(), listeners = new Map(), commands = new Map();
   let next = 1;
-  const post = message => parent.postMessage({ noai: 1, ...message }, '*');
+  // Noai hands this page a private port once it has loaded (see plugins/host.js).
+  // Calls made before then wait in `queue`.
+  let port = null;
+  const queue = [];
+  const post = message => {
+    const data = { noai: 1, ...message };
+    if (port) port.postMessage(data); else queue.push(data);
+  };
 
   function call(method, params = {}) {
     return new Promise((resolve, reject) => {
@@ -24,8 +31,13 @@
   }
 
   addEventListener('message', event => {
-    if (event.source !== parent) return;
-    const message = event.data;
+    if (port || event.source !== parent || event.data?.noai !== 1 || !event.data.connect || !event.ports[0]) return;
+    port = event.ports[0];
+    port.onmessage = message => receive(message.data);
+    for (const data of queue.splice(0)) port.postMessage(data);
+  });
+
+  function receive(message) {
     if (!message || message.noai !== 1) return;
     if (message.id && pending.has(message.id)) {
       const request = pending.get(message.id);
@@ -42,7 +54,7 @@
         .then(result => post({ commandDone: message.token, result: result ?? null }))
         .catch(error => post({ commandDone: message.token, error: String(error?.message || error) }));
     }
-  });
+  }
 
   window.noai = Object.freeze({
     call,
@@ -64,5 +76,6 @@
     /** Small key/value storage kept by Noai for this plugin. */
     storage: { get: key => call('storage.get', { key }), set: (key, value) => call('storage.set', { key, value }) },
   });
-  post({ ready: true });
+  // Ask for the port. `loaded` tells Noai whether this page's load event has already fired.
+  parent.postMessage({ noai: 1, hello: true, loaded: document.readyState === 'complete' }, '*');
 })();

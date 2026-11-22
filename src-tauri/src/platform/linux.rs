@@ -58,11 +58,38 @@ pub fn open_url(url: &str) -> std::io::Result<()> {
 // ---- Sleep and wake ----------------------------------------------------
 
 pub use super::unix::KeepAwake;
-use super::unix::{install_rule_script, remove_rule_script, sudo_allows, sudo_run, user_name};
+use super::unix::{
+    install_wake_script, remove_wake_script, sudo_allows, sudo_run, user_name, wake_rule,
+};
 
 pub const WAKE_SUPPORTED: bool = true;
 pub const WAKE_DETAIL: &str = "Noai sets the computer's wake alarm (rtcwake) for a minute before the next job. Turning this on asks for your password once, so Noai can set the alarm by itself afterwards.";
 static LAST_WAKE: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+/// The only command Noai's sudoers rule allows. It accepts just
+/// `set <unix time>` or `clear`.
+const WAKE_HELPER: &str = "/usr/local/libexec/noai-wake";
+
+fn wake_helper_body(rtcwake: &str) -> String {
+    format!(
+        r#"#!/bin/sh
+# Noai wake helper: sets or clears the RTC wake alarm. Installed by Noai;
+# its sudoers rule (/etc/sudoers.d/noai-wake) allows only this file.
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+case "$1" in
+  set)
+    [ "$#" -eq 2 ] || exit 64
+    case "$2" in ""|*[!0-9]*) exit 64 ;; esac
+    [ "${{#2}}" -le 12 ] || exit 64
+    exec {rtcwake} -m no -t "$2" ;;
+  clear)
+    [ "$#" -eq 1 ] || exit 64
+    exec {rtcwake} -m disable ;;
+  *) exit 64 ;;
+esac"#
+    )
+}
 
 fn rtcwake() -> Option<&'static str> {
     ["/usr/sbin/rtcwake", "/sbin/rtcwake", "/usr/bin/rtcwake"]
@@ -91,20 +118,19 @@ pub fn keep_awake(pid: u32) -> Option<KeepAwake> {
 }
 
 pub fn wake_enabled() -> bool {
-    rtcwake().is_some_and(|path| sudo_allows(&[path, "-m", "disable"]))
+    Path::new(WAKE_HELPER).exists() && sudo_allows(&[WAKE_HELPER, "clear"])
 }
 
 /// Sets the RTC alarm for `at`, or clears it. There is one alarm, so a new
 /// time simply replaces the old one.
 pub fn set_wake(at: Option<u64>) -> Result<(), String> {
-    let path = rtcwake().ok_or("rtcwake isn't installed")?;
     let mut last = LAST_WAKE.lock().unwrap();
     if *last == at {
         return Ok(());
     }
     match at {
-        Some(at) => sudo_run(&[path, "-m", "no", "-t", &at.to_string()])?,
-        None => sudo_run(&[path, "-m", "disable"])?,
+        Some(at) => sudo_run(&[WAKE_HELPER, "set", &at.to_string()])?,
+        None => sudo_run(&[WAKE_HELPER, "clear"])?,
     }
     *last = at;
     Ok(())
@@ -124,13 +150,18 @@ fn as_admin(script: &str) -> Result<(), String> {
     }
 }
 
-/// One admin prompt installs a sudoers rule allowing only rtcwake's
-/// "set alarm" and "clear alarm" forms for this user.
+/// One admin prompt installs the wake helper and a sudoers rule allowing only
+/// that helper for this user. It also replaces the older, wildcard rtcwake rule.
 pub fn enable_wake() -> Result<(), String> {
     let path = rtcwake().ok_or("rtcwake isn't installed (it's in util-linux)")?;
     let user = user_name().ok_or("Cannot tell which user you are")?;
-    let rule = format!("{user} ALL=(root) NOPASSWD: {path} -m no -t *, {path} -m disable");
-    as_admin(&install_rule_script(&rule, "root")?)?;
+    let rule = wake_rule(&user, WAKE_HELPER);
+    as_admin(&install_wake_script(
+        WAKE_HELPER,
+        &wake_helper_body(path),
+        &rule,
+        "root",
+    )?)?;
     if wake_enabled() {
         Ok(())
     } else {
@@ -140,5 +171,56 @@ pub fn enable_wake() -> Result<(), String> {
 
 pub fn disable_wake() -> Result<(), String> {
     let _ = set_wake(None);
-    as_admin(&remove_rule_script())
+    as_admin(&remove_wake_script(WAKE_HELPER))
+}
+
+/// The desktop's notification service, through notify-send (libnotify).
+pub fn notify(title: &str, body: &str) {
+    let _ = Command::new("notify-send")
+        .args(["--app-name=Noai", title, body])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With echo standing in for rtcwake, the helper passes on only the two
+    /// fixed forms and refuses extra flags such as a second `-m off`.
+    #[test]
+    fn wake_helper_passes_only_fixed_forms() {
+        let body = wake_helper_body("/bin/echo");
+        let run = |args: &[&str]| {
+            Command::new("/bin/sh")
+                .args(["-c", &body, "noai-wake"])
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let set = run(&["set", "1700000000"]);
+        assert_eq!(
+            String::from_utf8_lossy(&set.stdout),
+            "-m no -t 1700000000\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&run(&["clear"]).stdout),
+            "-m disable\n"
+        );
+        for args in [
+            &["set", "1", "-m", "off"][..],
+            &["set", "1 -m off"],
+            &["clear", "-m", "off"],
+            &["set"],
+            &["off"],
+        ] {
+            assert_eq!(
+                run(args).status.code(),
+                Some(64),
+                "{args:?} was not refused"
+            );
+        }
+    }
 }

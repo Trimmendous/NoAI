@@ -3,10 +3,18 @@ import { pill, row as uiRow, tile } from '../components/ui.js';
 
 // Runs Noai plugins (see PLUGINS.md). Every plugin page and background script
 // is a sandboxed iframe served from noaiplugin://, with no access to Noai
-// except the postMessage API below, and only for the permissions it declared.
+// except the API below, and only for the permissions it declared.
+//
+// The API runs over a private MessageChannel, handed to each frame once, when
+// the plugin's page says hello. Sandboxed frames all have the opaque origin
+// "null", so a message's origin can't tell the plugin from a site it was sent
+// to. If the frame later loads another document (a clicked link, a redirect),
+// Noai closes the port, so that page never talks to Noai, and replaces the
+// frame with a fresh one.
 
 const SANDBOX = 'allow-scripts allow-forms allow-modals';
 const PATH = /^[\w.-]+(\/[\w.-]+)*$/;
+const MAX_RELOADS = 3; // a frame that keeps leaving its page is left blank
 // Which permission each API call needs (null: always allowed).
 const METHODS = {
   'app.info': null, 'chats.open': null, 'storage.get': null, 'storage.set': null,
@@ -20,22 +28,79 @@ export const PERMISSION_TEXT = {
 
 export function initPluginHost({ native, platform, navEl, viewEl, workersEl, setView, getView, toast, api, onThemes, onManage = () => {} }) {
   let plugins = [], pages = [], commands = [], current = null;
-  const frames = new Map(); // contentWindow -> plugin
+  const links = new Map(); // iframe -> { plugin, port } while its own page is loaded
+  const frameState = new WeakMap(); // iframe -> { plugin, used, ownLoadPending, … }
   const pageFrames = new Map(); // page key -> iframe
   const workers = new Map(); // plugin id -> iframe
   const waiting = new Map(); // command token -> { resolve, reject }
   const base = () => (platform() === 'windows' ? 'http://noaiplugin.localhost/' : 'noaiplugin://localhost/');
   const allowed = (plugin, permission) => !permission || plugin.permissions.includes(permission);
 
-  function frame(plugin, path, className) {
+  /**
+   * A plugin frame. It gets an API port once, when its page says hello, and
+   * never again. The first load after that is the page's own (unless it had
+   * already loaded); any later load means the frame went somewhere else, so
+   * the port is closed and the frame is swapped for a fresh one.
+   */
+  function frame(plugin, path, className, reloads = 0) {
     const node = element('iframe', className);
     node.setAttribute('sandbox', SANDBOX);
     node.setAttribute('referrerpolicy', 'no-referrer');
     node.title = plugin.name;
+    const state = { plugin, used: false, ownLoadPending: false, rebuild: () => frame(plugin, path, className, reloads + 1), reloads };
+    frameState.set(node, state);
+    node.addEventListener('load', () => {
+      if (!links.has(node)) return; // the empty first document, or a page without the SDK
+      if (state.ownLoadPending) { state.ownLoadPending = false; return; }
+      left(node);
+    });
     node.src = `${base()}${plugin.id}/${path}`;
-    node.addEventListener('load', () => { if (node.contentWindow) frames.set(node.contentWindow, plugin); sendTheme(node); });
     return node;
   }
+
+  /** The frame loaded a page Noai didn't give it: cut it off and start over. */
+  function left(node) {
+    const state = frameState.get(node);
+    unlink(node);
+    if (state.reloads >= MAX_RELOADS) {
+      toast(`${state.plugin.name} kept leaving its page, so Noai stopped it. Turn it off and on to try again.`, 'error');
+      node.removeAttribute('src');
+      return;
+    }
+    toast(`${state.plugin.name} tried to open another page inside Noai, so Noai reloaded it.`, 'error');
+    const fresh = state.rebuild();
+    fresh.hidden = node.hidden;
+    for (const map of [workers, pageFrames]) for (const [key, value] of map) if (value === node) map.set(key, fresh);
+    node.replaceWith(fresh);
+  }
+
+  /** Gives a frame's page its own API port, once per frame. */
+  function connect(node, loaded) {
+    const state = frameState.get(node);
+    if (state.used || !node.contentWindow) return;
+    state.used = true;
+    state.ownLoadPending = !loaded;
+    const channel = new MessageChannel();
+    const link = { plugin: state.plugin, port: channel.port1 };
+    channel.port1.onmessage = event => receive(link, event.data);
+    links.set(node, link);
+    node.contentWindow.postMessage({ noai: 1, connect: true }, '*', [channel.port2]);
+    link.port.postMessage(themeMessage());
+  }
+  function unlink(node) {
+    const link = links.get(node);
+    if (!link) return;
+    link.port.onmessage = null;
+    link.port.close();
+    links.delete(node);
+  }
+  // A page's hello, the only message Noai takes outside a port.
+  addEventListener('message', event => {
+    if (event.data?.noai !== 1 || !event.data.hello) return;
+    for (const node of [...workers.values(), ...pageFrames.values()]) {
+      if (node.contentWindow && node.contentWindow === event.source) { connect(node, event.data.loaded === true); return; }
+    }
+  });
 
   /** Noai's current colours, so plugin pages can match. */
   function themeMessage() {
@@ -43,7 +108,7 @@ export function initPluginHost({ native, platform, navEl, viewEl, workersEl, set
     const vars = Object.fromEntries(['canvas', 'surface', 'surface-subtle', 'ink', 'ink-soft', 'ink-muted', 'line', 'accent', 'accent-ink', 'fill'].map(name => [name, style.getPropertyValue(`--${name}`).trim()]));
     return { noai: 1, theme: { dark: document.documentElement.dataset.theme === 'dark', vars } };
   }
-  function sendTheme(node) { node.contentWindow?.postMessage(themeMessage(), '*'); }
+  function sendTheme(node) { links.get(node)?.port.postMessage(themeMessage()); }
 
   // ---- loading ---------------------------------------------------------------
   async function load() {
@@ -65,15 +130,13 @@ export function initPluginHost({ native, platform, navEl, viewEl, workersEl, set
     }
     onThemes(themes);
     // Background scripts: one hidden frame per plugin that has `main`.
-    for (const [id, node] of workers) if (!on.some(plugin => plugin.id === id && plugin.manifest.main)) { frames.delete(node.contentWindow); node.remove(); workers.delete(id); }
+    for (const [id, node] of workers) if (!on.some(plugin => plugin.id === id && plugin.manifest.main)) { unlink(node); node.remove(); workers.delete(id); }
     for (const plugin of on) if (plugin.manifest.main && PATH.test(plugin.manifest.main) && !workers.has(plugin.id)) {
       const node = frame(plugin, '__main.html', 'plugin-worker');
       workers.set(plugin.id, node);
       workersEl.append(node);
-      // Known before its first message: the frame's window exists once it's in the page.
-      if (node.contentWindow) frames.set(node.contentWindow, plugin);
     }
-    for (const [key, node] of pageFrames) if (!pages.some(page => page.key === key)) { frames.delete(node.contentWindow); node.remove(); pageFrames.delete(key); }
+    for (const [key, node] of pageFrames) if (!pages.some(page => page.key === key)) { unlink(node); node.remove(); pageFrames.delete(key); }
     if (current && !pages.some(page => page.key === current)) { current = null; if (getView() === 'plugin') setView('chat'); }
     draw();
   }
@@ -117,7 +180,6 @@ export function initPluginHost({ native, platform, navEl, viewEl, workersEl, set
       const node = frame(page.plugin, page.entry, 'plugin-frame');
       pageFrames.set(key, node);
       viewEl.append(node);
-      if (node.contentWindow) frames.set(node.contentWindow, page.plugin);
     }
     for (const [other, node] of pageFrames) node.hidden = other !== key;
     setView('plugin');
@@ -152,36 +214,37 @@ export function initPluginHost({ native, platform, navEl, viewEl, workersEl, set
     return null;
   }
 
-  addEventListener('message', async event => {
-    const plugin = frames.get(event.source);
-    const message = event.data;
-    if (!plugin || !message || message.noai !== 1) return;
-    if (message.ready) { event.source.postMessage(themeMessage(), '*'); return; }
+  async function receive(link, message) {
+    const { plugin, port } = link;
+    if (!message || message.noai !== 1) return;
+    if (message.ready) { port.postMessage(themeMessage()); return; }
     if (message.commandDone) {
       const request = waiting.get(message.commandDone);
       if (request) { waiting.delete(message.commandDone); if (message.error) request.reject(new Error(message.error)); else request.resolve(message.result); }
       return;
     }
     if (!message.id || typeof message.method !== 'string') return;
-    try { event.source.postMessage({ noai: 1, id: message.id, result: await handle(plugin, message.method, message.params || {}) }, '*'); }
-    catch (error) { event.source.postMessage({ noai: 1, id: message.id, error: String(error?.message || error) }, '*'); }
-  });
+    // The link may have been closed while the call ran; a closed port drops the reply.
+    try { port.postMessage({ noai: 1, id: message.id, result: await handle(plugin, message.method, message.params || {}) }); }
+    catch (error) { port.postMessage({ noai: 1, id: message.id, error: String(error?.message || error) }); }
+  }
 
   /** Tells plugins about something that happened (only those allowed to know). */
   function emit(name, data, permission) {
-    for (const [target, plugin] of frames) if (allowed(plugin, permission)) target.postMessage({ noai: 1, event: name, data }, '*');
+    for (const { plugin, port } of links.values()) if (allowed(plugin, permission)) port.postMessage({ noai: 1, event: name, data });
   }
   function retheme() { for (const node of [...workers.values(), ...pageFrames.values()]) sendTheme(node); }
 
   async function run(command, context = {}) {
     const worker = workers.get(command.plugin.id);
-    if (!worker?.contentWindow) { toast(`${command.plugin.name} has no background script to run “${command.title}”.`, 'error'); return; }
+    const link = worker && links.get(worker);
+    if (!link) { toast(`${command.plugin.name} has no background script to run “${command.title}”.`, 'error'); return; }
     const token = crypto.randomUUID();
     const result = new Promise((resolve, reject) => {
       waiting.set(token, { resolve, reject });
       setTimeout(() => { if (waiting.delete(token)) reject(new Error('The plugin did not answer')); }, 60000);
     });
-    worker.contentWindow.postMessage({ noai: 1, command: command.id, token, context }, '*');
+    link.port.postMessage({ noai: 1, command: command.id, token, context });
     try { await result; } catch (error) { toast(`${command.plugin.name}: ${String(error?.message || error)}`, 'error'); }
   }
 
