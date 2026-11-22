@@ -153,7 +153,9 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   // Recurring jobs open on an overview with their runs; a run opens on its own.
   let runView = false;
   let copying = null;
-  let runLimit = 25;
+  // A job's runs are shown in pages, newest first, each led by its run number.
+  const RUNS_PER_PAGE = 20;
+  let runPage = 0;
   let conversationOpen = false;
   let detailSignature = '';
   let listScroll = 0;
@@ -385,6 +387,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   function openJob(task, run = null) {
     listScroll = $('#view-jobs').parentElement.scrollTop;
     detailSignature = '';
+    if (selectedJob !== task.id) runPage = 0;
     selectedJob = task.id; selectedRun = run?.runId || null; conversationOpen = false;
     runView = !!run || !task.intervalSeconds;
     renderDetail(); navigate('job'); $('#view-job').parentElement.scrollTop=0;
@@ -459,14 +462,19 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     }
     const prompt = element('details', 'job-prompt');
     prompt.append(element('summary', '', 'What it does'), element('p', 'scheduled-card-instructions', task.prompt));
-    const rows = runs.slice(0, runLimit).map((run, index) => {
+    const pages = Math.max(1, Math.ceil(runs.length / RUNS_PER_PAGE));
+    runPage = Math.min(runPage, pages - 1);
+    const first = runPage * RUNS_PER_PAGE;
+    const rows = runs.slice(first, first + RUNS_PER_PAGE).map((run, offset) => {
       const state = runStatus(run);
-      const number = runs.length - index;
+      const number = runs.length - first - offset;
       const tokensUsed = runTokens(run);
+      const badge = element('span', `run-number is-${state === 'completed' ? 'good' : ['failed', 'needs_attention'].includes(state) ? 'bad' : ['running', 'waiting'].includes(state) ? 'busy' : 'muted'}`, `#${number}`);
+      badge.setAttribute('aria-hidden', 'true');
       return uiRow({
-        leading: jobTile(state === 'completed' ? 'done' : ['failed', 'needs_attention'].includes(state) ? 'alert' : 'clock', state),
-        title: formatShortTime(run.startedAt),
-        subtitle: [`Run ${number}`, duration(run), tokensUsed ? `${compactNumber(tokensUsed)} tokens` : '', run.result && state !== 'completed' ? run.result : ''].filter(Boolean).join(' · '),
+        leading: badge,
+        title: `Run ${number}`,
+        subtitle: [formatShortTime(run.startedAt), duration(run), tokensUsed ? `${compactNumber(tokensUsed)} tokens` : '', run.result && state !== 'completed' ? run.result : ''].filter(Boolean).join(' · '),
         trailing: [pill(STATUS[state] || state, TONE[state] || 'muted')],
         onClick: () => { selectedRun = run.runId; runView = true; detailSignature = ''; renderDetail(); $('#view-job').parentElement.scrollTop = 0; },
         className: 'job-run-row',
@@ -479,7 +487,19 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     if (runErrors.has(task.id)) content.append(element('p', 'ui-footnote', runErrors.get(task.id)));
     if (rows.length) content.append(uiGroup(`Runs · ${runs.length}`, rows, 'Runs'));
     else content.append(uiGroup('Runs', [element('p', 'ui-list-empty', task.nextRunAt ? `No runs yet. The first one starts ${formatShortTime(task.nextRunAt)}.` : 'No runs yet.')], 'Runs'));
-    if (runs.length > runLimit) content.append(button(`Show ${Math.min(25, runs.length - runLimit)} more runs`, () => { runLimit += 25; detailSignature = ''; renderDetail(); }, 'job-show-more'));
+    if (pages > 1) {
+      const turn = delta => { runPage = Math.min(pages - 1, Math.max(0, runPage + delta)); detailSignature = ''; renderDetail(); content.querySelector('.run-pager')?.scrollIntoView({ block: 'nearest' }); };
+      const pager = element('nav', 'run-pager');
+      pager.setAttribute('aria-label', 'Run pages');
+      const previous = button('‹ Newer', () => turn(-1), 'secondary-button is-compact');
+      const next = button('Older ›', () => turn(1), 'secondary-button is-compact');
+      previous.disabled = runPage === 0;
+      next.disabled = runPage >= pages - 1;
+      const where = element('span', 'run-pager-label', `Runs ${runs.length - first - Math.min(RUNS_PER_PAGE, runs.length - first) + 1}–${runs.length - first} of ${runs.length} · Page ${runPage + 1} of ${pages}`);
+      where.setAttribute('aria-live', 'polite');
+      pager.append(previous, where, next);
+      content.append(pager);
+    }
   }
 
   function renderDetail() {
@@ -489,7 +509,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     const overview = !!task.intervalSeconds && !runView;
     $('#job-back').textContent = task.intervalSeconds && runView ? `← ${task.title}` : '← Back to Jobs';
     if (overview) {
-      const signature = JSON.stringify(['overview', task, runs, runLimit]);
+      const signature = JSON.stringify(['overview', task, runs, runPage]);
       if (signature === detailSignature) return;
       detailSignature = signature;
       $('#job-heading').textContent = task.title;

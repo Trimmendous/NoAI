@@ -125,6 +125,10 @@ function running(conversationId = active()?.id) {
 function updateConversation(id, transform) {
   store.setState(state => ({ ...state, conversations: state.conversations.map(item => item.id === id ? transform(item) : item) }));
 }
+/** A folder's display name; Noai's own automatic workspaces (random IDs in ~/.noai) say so. */
+function folderName(path) {
+  return !path || /[\\/]\.noai[\\/]/.test(path) ? 'Automatic workspace' : basename(path);
+}
 function savePreferences(changes) {
   store.setState(state => ({ ...state, preferences: { ...state.preferences, ...changes } }));
 }
@@ -237,15 +241,17 @@ function render() {
     else button.removeAttribute('aria-current');
   });
   $('#main-title').textContent = view === 'changes' ? 'Changes' : view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
-  const project = conversation?.projectPath || state.projectPath;
   // The chat box shows the folder this chat works in (or new chats will).
   const chatFolder = conversation ? conversation.projectPath : state.projectPath;
-  $('#project-label').textContent = chatFolder ? basename(chatFolder) : 'Automatic workspace';
+  $('#project-label').textContent = folderName(chatFolder);
   $('#choose-project').title = conversation
     ? `This chat works in ${chatFolder || 'its own folder'}. Pick another folder to start a new chat there.`
     : chatFolder ? `New chats work in ${chatFolder}` : 'Each new chat gets its own fresh folder in ~/.noai';
-  $('#header-project').textContent = project ? basename(project) : 'No project';
-  $('#header-project').title = project || '';
+  // The header names the chat's folder only on Chat; other pages show just their title.
+  $('#header-project').textContent = folderName(chatFolder);
+  $('#header-project').title = chatFolder || '';
+  $('#header-project').hidden = view !== 'chat';
+  document.querySelector('.breadcrumb-divider').hidden = view !== 'chat';
   $('#rename-chat').hidden = !conversation || view !== 'chat';
   $('#delete-chat').hidden = !conversation || view !== 'chat';
   $('#delete-chat').disabled = !!running();

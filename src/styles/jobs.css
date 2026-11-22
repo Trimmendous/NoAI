@@ -141,3 +141,11 @@
 .scheduled-tile.is-paused { background: var(--tile-settings); }
 .scheduled-status.is-paused { color: var(--ink-muted); background: var(--fill); }
 .job-row-actions .secondary-button.is-destructive { color: var(--error); }
+
+/* A job's runs: each row starts with its number, coloured by how it went. */
+.run-number { display: inline-grid; place-items: center; flex: none; min-width: 40px; height: 28px; padding: 0 7px; border-radius: 8px; color: var(--ink-soft); background: var(--fill); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.run-number.is-good { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.run-number.is-bad { color: var(--error); background: color-mix(in srgb, var(--error) 13%, transparent); }
+.run-number.is-busy { color: var(--warning); background: color-mix(in srgb, var(--warning) 15%, transparent); }
+.run-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 12px 0 4px; }
+.run-pager-label { color: var(--ink-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
