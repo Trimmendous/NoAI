@@ -28,7 +28,7 @@ export function createMessageRenderer(container) {
       if (!entry) {
         const node = element('article', `message role-${message.role}`);
         const header = element('div', 'message-header');
-        const name = message.role === 'user' ? 'You' : message.role === 'system' ? 'Noai' : getHarness(conversation.harness)?.label || 'Agent';
+        const name = message.role === 'user' ? 'You' : message.role === 'system' ? 'Noai' : conversation.agentLabel || getHarness(conversation.harness)?.label || 'Agent';
         header.append(element('span', 'message-avatar', name.slice(0, 1)), element('strong', '', name));
         const time = element('time', '', timeLabel(message.createdAt));
         time.dateTime = message.createdAt;

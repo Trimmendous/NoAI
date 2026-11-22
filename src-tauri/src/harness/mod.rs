@@ -6,6 +6,7 @@
 
 mod claude;
 mod codex;
+mod plugin_agent;
 
 use crate::adapters::{JobPermissions, RunEvent, RunRequest};
 use crate::local_metrics::FileState;
@@ -119,6 +120,11 @@ pub trait Harness: Send + Sync {
     fn args(&self, request: &RunRequest) -> Vec<String>;
     /// Normalizes one JSON line of the CLI's output.
     fn parse(&self, request: &RunRequest, value: &Value) -> Vec<RunEvent>;
+    /// For CLIs that print plain text: handles a raw output line instead of
+    /// JSON parsing. `None` (the default) means "parse it as JSON".
+    fn parse_text(&self, _request: &RunRequest, _line: &str) -> Option<Vec<RunEvent>> {
+        None
+    }
     /// Whether "try again at 3:23 PM" (host local time) reset messages are trusted.
     fn local_clock_resets(&self) -> bool {
         false
@@ -128,6 +134,11 @@ pub trait Harness: Send + Sync {
     fn models(&self) -> BoxFuture<Vec<HarnessModel>>;
     /// Model IDs the user configured for this CLI (settings files, env vars),
     /// including custom or proxied ones the CLI doesn't list.
+    /// A plain-English warning for a stderr line the user should act on even
+    /// when the run succeeds, such as settings the CLI ignored.
+    fn stderr_notice(&self, _request: &RunRequest, _line: &str) -> Option<String> {
+        None
+    }
     fn configured_models(&self, _home: &Path) -> Vec<String> {
         Vec::new()
     }
@@ -158,14 +169,37 @@ pub trait Harness: Send + Sync {
     }
 }
 
-static ALL: &[&dyn Harness] = &[&codex::Codex, &claude::Claude];
+static BUILT_IN: &[&dyn Harness] = &[&codex::Codex, &claude::Claude];
 
-pub fn all() -> &'static [&'static dyn Harness] {
-    ALL
+/// Agents added by enabled plugins. Each reload leaks the few small agent
+/// descriptions it replaces, which only happens when plugins are switched.
+static PLUGIN_AGENTS: std::sync::RwLock<Vec<&'static dyn Harness>> =
+    std::sync::RwLock::new(Vec::new());
+static PLUGINS_LOADED: std::sync::Once = std::sync::Once::new();
+
+/// Re-reads plugin agents after plugins are turned on or off.
+pub fn reload_plugins() {
+    let agents: Vec<&'static dyn Harness> = crate::plugins::agents()
+        .into_iter()
+        .filter(|spec| !BUILT_IN.iter().any(|harness| harness.id() == spec.id))
+        .map(|spec| {
+            &*Box::leak(Box::new(plugin_agent::PluginAgent::new(spec))) as &'static dyn Harness
+        })
+        .collect();
+    *PLUGIN_AGENTS.write().unwrap() = agents;
+}
+
+pub fn all() -> Vec<&'static dyn Harness> {
+    PLUGINS_LOADED.call_once(reload_plugins);
+    BUILT_IN
+        .iter()
+        .copied()
+        .chain(PLUGIN_AGENTS.read().unwrap().iter().copied())
+        .collect()
 }
 
 pub fn get(id: &str) -> Option<&'static dyn Harness> {
-    ALL.iter().copied().find(|harness| harness.id() == id)
+    all().into_iter().find(|harness| harness.id() == id)
 }
 
 pub fn require(id: &str) -> Result<&'static dyn Harness, String> {

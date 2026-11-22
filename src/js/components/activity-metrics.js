@@ -9,6 +9,9 @@ const number = value=>value.toLocaleString();
 export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
   let rows=[],jobRuns=[],jobError='',loading=false,hasData=!native;
   const harness=$('#metrics-harness'),model=$('#metrics-model'),range=$('#metrics-range'),metric=$('#metrics-value'),style=$('#metrics-style');
+  // The period (top of the page, shared by every chart) and the chart type are remembered on this device.
+  const saved=['metrics-range','metrics-style','metrics-outcomes-style'];
+  for(const id of saved){try{const value=localStorage.getItem(`noai.${id}`);const node=$(`#${id}`);if(value&&[...node.options].some(option=>option.value===value))node.value=value;}catch{/* storage unavailable */}}
   function options() {
     const selectedHarness=harness.value,selectedModel=model.value;
     const harnesses=[...new Set(rows.map(row=>row.harness))].sort();
@@ -32,8 +35,9 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
       ['Cost',report.cost===null?'—':`$${report.cost.toLocaleString(undefined,{maximumFractionDigits:2})}`,report.cost===null?'Not reported by your agents':`${report.costReports} / ${report.usageReports} reports priced · USD`,'coin','var(--tile-accounts)',''],
       ['Sessions',number(report.runs),'Agent sessions and Noai runs','chat','var(--tile-jobs)','']
     ]) {const card=element('div','ui-filter ui-stat metrics-stat');card.style.setProperty('--filter',color);const top=element('span','ui-filter-top'),mark=element('span','ui-filter-icon');mark.append(icon(kind));const strong=element('strong','metrics-stat-value',value);if(title)strong.title=title;top.append(mark,strong);card.append(top,element('span','ui-filter-label metric-label',label),element('small','',note));cards.append(card);}
-    renderUsageChart($('#metrics-chart'),report,{metric:metric.value,style:style.value});
-    renderOutcomesChart($('#metrics-outcomes'),report);
+    const usageReport=report;
+    renderUsageChart($('#metrics-chart'),usageReport,{metric:metric.value,style:style.value});
+    renderOutcomesChart($('#metrics-outcomes'),report,{style:$('#metrics-outcomes-style').value});
     const insights=$('#metrics-insights');insights.replaceChildren();
     for(const [label,group] of [['Most-used model',report.models[0]],['Most-used harness',report.harnesses[0]]]) {
       const card=element('div','insight-card');
@@ -42,7 +46,7 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
     }
     const change=report.comparison, card=element('div','insight-card');
     card.append(element('span','metric-label','Compared with preceding period'),element('strong','',!change?'All-time view':`${change.absolute>=0?'+':''}${number(change.absolute)} tokens`),element('p','',!change?'Choose a shorter period to compare.':change.percent===null?'No recorded baseline; percentage unavailable.':`${change.percent>=0?'+':''}${change.percent.toFixed(1)}% · previous ${number(report.previous)} tokens`));insights.append(card);
-    $('#metrics-chart-caption').textContent=`${report.step===3600?'Hourly':report.step===86400?'Daily':`${report.step/86400}-day`} totals in your local timezone · Partial first/last buckets. Input without cache reads includes cache writes when not separately recorded.${report.baselineOnly?' Resumed sessions without a prior reading establish a baseline first.':''}`;
+    $('#metrics-chart-caption').textContent=`${usageReport.step===3600?'Hourly':usageReport.step===86400?'Daily':`${usageReport.step/86400}-day`} totals in your local timezone · Partial first/last buckets. Input without cache reads includes cache writes when not separately recorded.${usageReport.baselineOnly?' Resumed sessions without a prior reading establish a baseline first.':''}`;
     const daily=$('#metrics-daily');daily.replaceChildren();
     for(const day of report.daily) {
       const row=element('tr');
@@ -78,7 +82,8 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
     finally {loading=false;$('#metrics-refresh').disabled=false;}
   }
   harness.addEventListener('change',()=>{model.value='';options();render();});
-  for(const node of [model,range,metric,style])node.addEventListener('change',render);
+  for(const node of [model,range,metric,style,$('#metrics-outcomes-style')])node.addEventListener('change',render);
+  for(const id of saved)$(`#${id}`).addEventListener('change',event=>{try{localStorage.setItem(`noai.${id}`,event.target.value);}catch{/* storage unavailable */}});
   $('#metrics-refresh').addEventListener('click',()=>void refresh());render();
   return {refresh};
 }

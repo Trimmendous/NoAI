@@ -70,33 +70,6 @@ export function renderAccounts(container, runtime, native, snapshots = [], manua
   container.replaceChildren(fragment);
 }
 
-export function renderDetails(container, conversation, workspace, running) {
-  const fragment = document.createDocumentFragment();
-  const items = [
-    ['Project', conversation?.projectPath || workspace.projectPath || 'No folder selected'],
-    ['Harness', getHarness(conversation?.harness)?.label || conversation?.harness || '—'],
-    ['Model', conversation?.model || 'Harness default'],
-    ['Session', conversation?.resumeId ? 'Native session retained' : 'New session'],
-    ['Status', running ? 'Working' : 'Ready'],
-  ];
-  for (const [label, value] of items) {
-    const item = element('div', 'detail-item');
-    item.append(element('span', 'eyebrow', label), element('p', 'detail-value', value));
-    fragment.append(item);
-  }
-  const note = element('div', 'detail-note');
-  note.append(element('h3', '', 'Your work stays local'), element('p', '', 'Conversations are saved on this device. The selected coding agent connects to its own provider.'));
-  fragment.append(note);
-  const permissions = element('div', 'detail-note');
-  permissions.append(element('h3', '', 'Agent permissions'), element('p', '', conversation?.dangerouslyBypassPermissions ? 'Permission bypass is enabled for this conversation. Agent tools may execute without approval.' : 'Normal CLI permissions apply. Claude tools requiring an interactive approval are denied in this build.'));
-  fragment.append(permissions);
-  const automation = element('div', 'detail-note');
-  automation.append(element('h3', '', 'Automatic resume'), element('p', '', workspace.preferences.autoResume ? 'Timed provider limits can pause this task and resume its native session after reset. View waiting tasks in Activity.' : 'Disabled for new requests. You can enable it in Settings.'));
-  automation.append(element('p', '', 'The background scheduler runs independently of this window. Use noai service stop to stop the systemd service.'));
-  fragment.append(automation);
-  container.replaceChildren(fragment);
-}
-
 export function renderActivity(container, workspace, liveActivities) {
   const entries = workspace.conversations.flatMap(conversation => conversation.messages.filter(message => message.role === 'user' || message.role === 'system').map(message => ({ id: message.id, text: message.content, at: message.createdAt, title: conversation.title, project: basename(conversation.projectPath), harness: conversation.harness, role: message.role })));
   entries.push(...liveActivities);

@@ -21,7 +21,7 @@
 .chart-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; color: var(--ink-soft); }
 .chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
-:root { --chart-input: #50749b; --chart-cache: #67834d; --chart-output: #a46797; }
+:root { --chart-input: #50749b; --chart-cache: #67834d; --chart-output: #a46797; --outcome-tool: #ec835a; --outcome-connection: #d03b3b; --outcome-api: #fab219; }
 :root[data-theme='dark'] { --chart-input: #8eb8e0; --chart-cache: #b0cb89; --chart-output: #d9a4ca; }
 .series-uncached { fill: var(--chart-input); background: var(--chart-input); }
 .series-cached { fill: var(--chart-cache); background: var(--chart-cache); }
@@ -81,7 +81,6 @@ button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visib
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
 .metrics-job-summary { color: var(--ink-muted); font-size: 13px; line-height: 1.5; margin: 18px 4px; }
-.home-view .metrics-controls .chart-mode-control { flex: .55 1 80px; }
 .home-view .metrics-status { margin: 0; }
 .home-view .metrics-insights { margin: 24px 0; }
 .home-view .page-heading { margin-bottom: 24px; }
@@ -92,3 +91,48 @@ button:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visib
 .metrics-chart rect, .metrics-chart circle { stroke: none; }
 @media (max-width: 720px) { .metrics-chart .chart-label { font-size: 24px; } }
 .session-message.is-user details { color: inherit; }
+
+/* Each chart's own controls sit at the right of its title and wrap under it on narrow windows. */
+.metrics-figure-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 12px; }
+.metrics-figure-head h3 { margin: 0; }
+.metrics-figure-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.metrics-figure-controls label { display: block; margin: 0; }
+
+/* One job or session: the Dashboard's charts for just that item. */
+.item-analytics { margin-top: 24px; }
+.item-analytics > .metrics-figure-head h3, .item-analytics-title { margin: 0; font-size: 17px; font-weight: 600; }
+.item-analytics .metrics-figure { margin: 16px 0; }
+.item-analytics .metrics-figure h4, .item-analytics-breakdown h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.item-analytics-tiles { margin-top: 12px; }
+.item-analytics-breakdown { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.item-analytics-breakdown > section { padding: 18px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--card-shadow); }
+.item-analytics-breakdown h4 { margin-bottom: 12px; }
+.item-analytics-models .ui-list { box-shadow: none; background: transparent; }
+@media (max-width: 760px) { .item-analytics-breakdown { grid-template-columns: 1fr; } }
+
+/* Dashboard › Your plans: compact usage limits with live countdowns (details live in Accounts). */
+.plans-overview { margin: 0 0 22px; }
+.plans-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.plans-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.plans-empty { margin: 0; padding: 12px 14px; border-radius: var(--radius-md); color: var(--ink-muted); background: var(--surface); box-shadow: var(--card-shadow); font-size: 12.5px; }
+.plans-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.plan-card { display: grid; align-content: start; gap: 9px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--card-shadow); }
+.plan-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plan-card-head .ui-tile.is-small { width: 22px; height: 22px; border-radius: 6px; }
+.plan-card-head .ui-tile.is-small img, .plan-card-head .ui-tile.is-small svg { width: 14px; height: 14px; }
+.plan-card-copy { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.plan-card-copy strong { font-size: 13px; white-space: nowrap; }
+.plan-card-copy span { overflow: hidden; color: var(--ink-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.plan-window { display: grid; gap: 4px; }
+.plan-window-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--ink-soft); font-size: 12px; }
+.plan-used { color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.plan-meter { position: relative; height: 6px; border-radius: var(--radius-pill); background: var(--fill); }
+.plan-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--success); transition: width .4s var(--ease); }
+.plan-window.is-warn .plan-meter-fill { background: var(--warning); }
+.plan-window.is-bad .plan-meter-fill { background: var(--error); }
+/* Where "now" falls in the window: a fill past the marker means you're ahead of pace. */
+.plan-meter-time { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); box-shadow: 0 0 0 1.5px var(--surface); }
+.plan-meter-time[hidden] { display: none; }
+.plan-window-foot { display: flex; justify-content: space-between; gap: 8px; color: var(--ink-muted); font-size: 11px; }
+.plan-countdown { font-variant-numeric: tabular-nums; }
+.plan-pace { color: var(--warning); font-weight: 600; white-space: nowrap; }

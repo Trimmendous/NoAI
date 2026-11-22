@@ -1,0 +1,78 @@
+/* Models tab, flock view: agents lead V formations of their models across the sky. */
+.models-view-switch { margin-bottom: 18px; }
+.flock-card { margin: 0 0 24px; padding: 8px 8px 12px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--card-shadow); }
+.flock-sky { display: block; width: 100%; height: auto; overflow: hidden; border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.flock-sky * { stroke-linecap: round; stroke-linejoin: round; }
+.flock-clouds ellipse { fill: color-mix(in srgb, var(--ink) 4%, transparent); stroke: none; }
+
+.flock { transition: opacity .3s var(--ease); }
+.flock.is-dimmed { opacity: .18; }
+.flock-tag { cursor: pointer; outline: none; }
+.flock-label { fill: var(--ink-muted); stroke: none; font-size: 11px; font-weight: 600; transition: fill .15s var(--ease); }
+.flock-tag:hover .flock-label { fill: var(--ink); text-decoration: underline; }
+.flock-tag:focus-visible .flock-label { fill: var(--ink); text-decoration: underline; }
+.flock-tag.is-selected .flock-label { fill: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; }
+.flock-tag-logo { pointer-events: none; }
+:root[data-theme='dark'] .flock-tag-logo.is-mono { filter: invert(1); }
+
+.flock-bird { cursor: pointer; outline: none; }
+.flock-body { fill: var(--agent); stroke: none; }
+.flock-bird.is-idle .flock-bird-shape { opacity: .55; }
+.flock-neck, .flock-legs { fill: none; stroke: var(--agent); }
+.flock-legs { stroke-width: 1.2; }
+.flock-beak { fill: color-mix(in srgb, var(--agent) 35%, var(--ink)); stroke: none; }
+.flock-eye { fill: var(--surface); stroke: none; }
+.flock-wing { stroke: none; transform-box: fill-box; transform-origin: right bottom; }
+.flock-wing.is-near { fill: var(--agent); opacity: .92; }
+.flock-wing.is-far { fill: color-mix(in srgb, var(--agent) 50%, var(--surface)); }
+.flock-mark { pointer-events: none; opacity: .95; }
+.flock-mark-colour { flood-color: var(--flock-mark); }
+/* Selected (or keyboard-focused) bird: a bright outline that follows its silhouette. */
+.flock-outline-glow { flood-color: var(--accent); flood-opacity: .85; }
+.flock-outline-edge { flood-color: var(--ink); flood-opacity: .55; }
+.flock-bird.is-selected .flock-bird-shape, .flock-bird:focus-visible .flock-bird-shape { filter: url(#flock-outline); }
+.flock-bird.is-selected.is-idle .flock-bird-shape { opacity: 1; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .flock-wing { animation: flock-flap .4s ease-in-out infinite alternate; }
+  @keyframes flock-flap { from { transform: scaleY(1); } to { transform: scaleY(-.65); } }
+}
+.flock-sky.is-paused .flock-wing { animation-play-state: paused; }
+
+.flock-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 6px 0; }
+.flock-hint { color: var(--ink-muted); font-size: 12px; }
+.flock-value { color: var(--ink-soft); font-size: 13px; }
+
+/* The selected bird's details: a card floating beside it in the sky. */
+.flock-stage { position: relative; }
+.flock-details { position: absolute; z-index: 2; display: grid; gap: 12px; width: min(320px, calc(100% - 24px)); padding: 16px; border-radius: var(--radius-lg); color: var(--ink); background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--raised-shadow); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); animation: flock-card-in .18s var(--ease); }
+.flock-details[hidden] { display: none; }
+.flock-details.is-docked { position: static; width: auto; margin: 12px 4px 0; }
+@keyframes flock-card-in { from { opacity: 0; transform: translateY(4px) scale(.98); } }
+.flock-card-head { display: flex; align-items: center; gap: 11px; }
+.flock-card-title { display: grid; flex: 1; min-width: 0; }
+.flock-card-title strong { overflow: hidden; font-size: 16px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.flock-card-title span { color: var(--ink-muted); font-size: 12px; }
+.flock-close { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border: 0; border-radius: 50%; color: var(--ink-muted); background: var(--fill); font-size: 16px; line-height: 1; }
+.flock-close:hover { color: var(--ink); background: var(--fill-hover); }
+.flock-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.flock-pill { padding: 2px 9px; border-radius: var(--radius-pill); color: var(--ink-soft); background: var(--fill); font-size: 11.5px; font-weight: 500; }
+.flock-pill.is-active { color: var(--success); background: color-mix(in srgb, var(--success) 13%, transparent); }
+.flock-stat { display: grid; }
+.flock-stat strong { font-size: 30px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.flock-stat span { color: var(--ink-muted); font-size: 12px; }
+.flock-share { display: grid; gap: 5px; }
+.flock-share small { color: var(--ink-muted); font-size: 11.5px; }
+.flock-share-bar { display: block; height: 6px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill); }
+.flock-share-bar span { display: block; height: 100%; border-radius: inherit; background: var(--agent, var(--accent)); }
+.flock-id { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.flock-id code { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.flock-actions { display: flex; gap: 8px; }
+.flock-actions .primary-button { flex: 1; }
+.flock-model-list { display: grid; gap: 2px; }
+.flock-model-item { display: grid; grid-template-columns: minmax(0, 1fr) 70px 46px; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: var(--radius-sm); color: var(--ink); background: transparent; text-align: left; }
+.flock-model-item:hover { background: var(--fill); }
+.flock-model-name { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.flock-model-item small { color: var(--ink-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; }
+.flock-facts { margin: 0; overflow: hidden; color: var(--ink-muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .flock-details { animation: none; } }

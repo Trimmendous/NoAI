@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../_sdk/noai.css" />
+    <script src="../_sdk/noai.js"></script>
+  </head>
+  <body>
+    <h1>Hello from a plugin</h1>
+    <p>This page is a plugin. It runs in a sandbox and can only see what its permissions allow.</p>
+    <p><button id="hello">Show a notification</button></p>
+    <h2>Recent chats</h2>
+    <div id="chats" class="list"><div class="muted">Loading…</div></div>
+    <h2>Jobs</h2>
+    <div id="jobs" class="list"><div class="muted">Loading…</div></div>
+    <script>
+      const row = (left, right, onClick) => {
+        const item = document.createElement('div');
+        const a = document.createElement('span'), b = document.createElement('span');
+        a.textContent = left; b.textContent = right; b.className = 'muted';
+        item.append(a, b);
+        if (onClick) { item.style.cursor = 'pointer'; item.addEventListener('click', onClick); }
+        return item;
+      };
+      document.getElementById('hello').addEventListener('click', () => noai.notify('Hello from the example plugin 👋'));
+      noai.chats.list().then(chats => {
+        const box = document.getElementById('chats');
+        box.replaceChildren(...(chats.slice(0, 8).map(chat => row(chat.title, `${chat.messageCount} messages`, () => noai.chats.open(chat.id)))));
+        if (!chats.length) box.replaceChildren(row('No chats yet', ''));
+      });
+      noai.jobs.list().then(jobs => {
+        const box = document.getElementById('jobs');
+        box.replaceChildren(...jobs.slice(0, 8).map(job => row(job.title, job.status)));
+        if (!jobs.length) box.replaceChildren(row('No jobs yet', ''));
+      });
+    </script>
+  </body>
+</html>

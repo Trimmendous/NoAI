@@ -171,4 +171,7 @@
   --agent-cursor: #3a3a3c;
   --agent-openrouter: #6467f2;
   --agent-noai: #007aff;
+  /* Models › Flocks: the selected bird's outline, and logos printed on a bird's body. */
+  --flock-highlight: #ffd60a;
+  --flock-mark: #ffffff;
 }

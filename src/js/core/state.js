@@ -1,6 +1,6 @@
 export const WORKSPACE_VERSION = 1;
 
-const THEMES = new Set(['system', 'light', 'dark']);
+const THEMES = new Set(['system', 'light', 'dark', 'matrix']);
 const PALETTES = new Set(['graphite', 'sage', 'blue', 'purple', 'amber']);
 // Version 2 made blue the default. Grey from before then was the old default, not a choice.
 const PALETTE_VERSION = 2;
@@ -111,7 +111,7 @@ export function normalizeWorkspace(raw) {
     activeConversationId: seen.has(requestedActiveId) ? requestedActiveId : null,
     projectPath: nullableText(input.projectPath),
     preferences: {
-      theme: THEMES.has(preferences.theme) ? preferences.theme : initial.preferences.theme,
+      theme: THEMES.has(preferences.theme) || /^plugin:[a-z0-9-]{1,40}:[a-z0-9-]{1,40}$/.test(preferences.theme || '') ? preferences.theme : initial.preferences.theme,
       palette: PALETTES.has(preferences.palette) && !(preferences.palette === 'graphite' && preferences.paletteVersion !== PALETTE_VERSION) ? preferences.palette : initial.preferences.palette,
       paletteVersion: PALETTE_VERSION,
       autoResume: preferences.autoResume !== false,

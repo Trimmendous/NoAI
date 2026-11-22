@@ -10,7 +10,12 @@ export function isNative() {
 
 async function invoke(command, args) {
   if (!isNative()) throw new Error('This action requires the Noai desktop app.');
-  return tauri().core.invoke(command, args);
+  try { return await tauri().core.invoke(command, args); }
+  catch (error) {
+    // The background service predates this app (it keeps running across rebuilds).
+    if (/unknown variant/.test(String(error))) throw new Error('The Noai background service is older than this app, so it doesn’t know this action yet. Quit and reopen Noai to update it (it waits for running jobs to finish first).');
+    throw error;
+  }
 }
 
 export async function runtimeStatus() {
@@ -120,4 +125,23 @@ export async function openWebLink(url) { if (isNative()) return invoke('open_web
 
 export async function getDigest() { return isNative() ? invoke('get_digest') : { task: null, runs: [] }; }
 export async function setDigest(input) { return invoke('set_digest', { input }); }
+export async function getJobInstructions() { return isNative() ? invoke('get_job_instructions') : { recurring: '', oneTime: '' }; }
+export async function setJobInstructions(input) { return invoke('set_job_instructions', { input }); }
+export async function getWakeStatus() { return isNative() ? invoke('get_wake_status') : { supported: false, enabled: false, detail: 'Open the desktop app to manage sleep and wake.' }; }
+export async function setWakeForJobs(enabled) { return invoke('set_wake_for_jobs', { enabled }); }
+export async function openChatWindow(conversationId, title, x = null, y = null) { return invoke('open_chat_window', { conversationId, title, x, y }); }
+export async function focusChatWindow(conversationId) { return invoke('focus_chat_window', { conversationId }); }
+export async function closeChatWindow(conversationId) { return invoke('close_chat_window', { conversationId }); }
+/** Messages between the main window and chats in their own windows. */
+export async function listenChatWindows(onAction, onClosed) {
+  if (!isNative()) return;
+  await tauri().event.listen('noai:chat-window-action', event => onAction(event.payload || {}));
+  await tauri().event.listen('noai:chat-window-closed', event => onClosed(String(event.payload || '')));
+}
+export async function sendToChatWindow(conversationId, chat) { if (isNative()) return tauri().event.emitTo(`chat-${conversationId}`, 'noai:chat-window-sync', { id: conversationId, chat }); }
+export async function listPlugins() { return isNative() ? invoke('list_plugins') : []; }
+export async function setPluginEnabled(id, enabled) { return invoke('set_plugin_enabled', { id, enabled }); }
+export async function createExamplePlugin() { return invoke('create_example_plugin'); }
+export async function deletePlugin(id) { return invoke('delete_plugin', { id }); }
+export async function openPluginsFolder() { return invoke('open_plugins_folder'); }
 export async function runDigestNow() { return invoke('run_digest_now'); }

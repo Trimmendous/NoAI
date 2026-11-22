@@ -48,7 +48,7 @@ const PERMISSIONS: &[Permission] = &[
     Permission {
         id: JobPermissions::ProviderDefault,
         label: "Existing CLI settings",
-        description: "Keep Claude Code’s configured permissions. Actions that need approval are denied, since nobody is there to answer.",
+        description: "Use the allow rules in Claude Code’s settings. Claude only reads a project’s rules after you’ve trusted that folder in Claude Code, and anything not allowed is denied, since nobody is there to answer. Automatic review works in any folder.",
     },
 ];
 
@@ -103,6 +103,10 @@ impl Harness for Claude {
 
     fn models(&self) -> BoxFuture<Vec<HarnessModel>> {
         Box::pin(claude_models())
+    }
+
+    fn stderr_notice(&self, request: &RunRequest, line: &str) -> Option<String> {
+        claude_stderr_notice(&request.project_path, line)
     }
 
     fn configured_models(&self, home: &Path) -> Vec<String> {
@@ -676,6 +680,30 @@ fn read_limits() -> Option<(u64, Value)> {
     Some((saved["at"].as_u64()?, saved["info"].clone()))
 }
 
+/// Claude names each window after its length ("five_hour", "seven_day",
+/// "seven_day_opus"), so the length comes from Anthropic's own key.
+fn window_seconds_from_key(key: &str) -> Option<u64> {
+    let mut parts = key.split('_');
+    let count = parts.next()?;
+    let count = count.parse::<u64>().ok().or_else(|| {
+        [
+            "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve",
+        ]
+        .iter()
+        .position(|word| *word == count)
+        .map(|index| index as u64 + 1)
+    })?;
+    let unit = match parts.next()?.trim_end_matches('s') {
+        "minute" => 60,
+        "hour" => 3_600,
+        "day" => 86_400,
+        "week" => 604_800,
+        _ => return None,
+    };
+    Some(count * unit)
+}
+
 fn limit_windows(info: &Value) -> Vec<ProviderUsageWindow> {
     let mut windows: Vec<_> = info["unifiedWindows"]
         .as_object()
@@ -702,6 +730,7 @@ fn limit_windows(info: &Value) -> Vec<ProviderUsageWindow> {
                 remaining: None,
                 limit: None,
                 resets_at: window["resetsAt"].as_u64(),
+                window_seconds: window_seconds_from_key(key),
             })
         })
         .collect();
@@ -777,9 +806,26 @@ async fn probe_limits() {
     let _ = child.kill().await;
 }
 
+/// Claude Code skips a project's `.claude/settings.json` permissions until the
+/// folder is trusted, and headless runs never show the trust prompt.
+fn claude_stderr_notice(project: &str, line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    (lower.contains("has not been trusted") || lower.contains("not trusted")).then(|| format!(
+        "Claude Code ignored this project's permission settings because the folder isn't trusted yet, so commands and edits that need approval were denied. To fix it, open a terminal in {project}, run `claude` once and accept the trust prompt."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn untrusted_workspace_becomes_a_notice() {
+        let line = "Ignoring 19 permissions.allow entries from .claude/settings.json: this workspace has not been trusted. Run Claude Code interactively here once";
+        let notice = claude_stderr_notice("/p/dojo", line).unwrap();
+        assert!(notice.contains("/p/dojo") && notice.contains("trust"));
+        assert!(claude_stderr_notice("/p", "Loading MCP servers").is_none());
+    }
 
     #[test]
     fn configured_models_come_from_settings_and_env_only() {
@@ -820,6 +866,13 @@ mod tests {
         assert_eq!(windows[0].used_percent, Some(9.0));
         assert_eq!(windows[0].resets_at, Some(100));
         assert_eq!(windows[2].used_percent, Some(100.0));
+        // Lengths come from Anthropic's window names, not assumptions.
+        assert_eq!(
+            windows.iter().map(|w| w.window_seconds).collect::<Vec<_>>(),
+            [Some(18_000), Some(604_800), Some(604_800)]
+        );
+        assert_eq!(window_seconds_from_key("eight_hour"), Some(28_800));
+        assert_eq!(window_seconds_from_key("overage"), None);
         assert!(limit_windows(&json!({"status":"allowed"})).is_empty());
     }
 

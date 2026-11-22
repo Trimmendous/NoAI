@@ -6,7 +6,7 @@ It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 
 ## What it does
 
-- **Chat** with whichever agent you have installed. Noai finds them for you.
+- **Chat** with whichever agent you have installed. Noai finds them for you. Open several chats as tabs, split the window into as many panes as you like, or drag a chat out into its own window.
 - **Jobs**: tell an agent to do something now, later, or every day. Closing the window doesn't stop them.
 - **Auto-resume**: if an agent hits its usage limit, Noai waits for the reset and picks up where it left off.
 - **Sessions**: every past conversation in one list, including ones you started outside Noai. Each one shows how full its context got and how many tokens it used.
@@ -14,6 +14,8 @@ It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 - **Models**: every agent on your computer and the models it can use, drawn as a little graph.
 - **Accounts**: how much of your Claude or Codex quota you have left.
 - **Daily digest**: a short morning report on what ran, what broke and what needs you.
+- **Plugins**: add your own pages, ⌘K commands, themes and even new agents. See [PLUGINS.md](PLUGINS.md).
+- **Accessibility**: a text size slider, colour-blind-friendly modes, more contrast and less motion, all in Settings.
 
 ## Getting started
 

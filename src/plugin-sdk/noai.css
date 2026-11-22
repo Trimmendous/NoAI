@@ -1,0 +1,14 @@
+/* Optional base styles for plugin pages: <link rel="stylesheet" href="../_sdk/noai.css">.
+   Colours follow Noai's theme through --noai-* variables. */
+:root { color-scheme: light dark; --noai-canvas: #f5f5f7; --noai-surface: #fff; --noai-ink: #1d1d1f; --noai-ink-muted: #6e6e73; --noai-line: #e5e5ea; --noai-accent: #007aff; --noai-accent-ink: #fff; --noai-fill: rgba(118, 118, 128, .12); }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 28px; color: var(--noai-ink); background: var(--noai-canvas); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif; }
+h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.02em; }
+h2 { margin: 24px 0 8px; font-size: 15px; }
+p, .muted { color: var(--noai-ink-muted); }
+.card { padding: 14px 16px; border-radius: 12px; background: var(--noai-surface); box-shadow: 0 0 0 .5px var(--noai-line); }
+.list { overflow: hidden; border-radius: 12px; background: var(--noai-surface); box-shadow: 0 0 0 .5px var(--noai-line); }
+.list > * { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; }
+.list > * + * { border-top: 1px solid var(--noai-line); }
+button { padding: 6px 14px; border: 0; border-radius: 980px; color: var(--noai-accent-ink); background: var(--noai-accent); font: inherit; font-weight: 600; cursor: pointer; }
+button.secondary { color: var(--noai-ink); background: var(--noai-fill); }

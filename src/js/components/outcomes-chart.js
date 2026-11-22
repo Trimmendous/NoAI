@@ -31,7 +31,14 @@ function niceMax(value) {
   return [1, 2, 2.5, 5, 10].map(step => step*power).find(step => step >= value);
 }
 
-export function renderOutcomesChart(container, report) {
+// In line mode each series is its own line. Successful calls usually dwarf
+// errors on one scale, so clicking a legend name hides that line and the
+// scale fits what's left (one axis, never two). Hidden lines stay hidden
+// across redraws.
+const hidden = new Set();
+const SERIES = [['ok', 'Successful calls', 'outcome-ok', point => point.responses + point.toolOk], ...ERRORS.map(([key, label, className]) => [key, label, className, point => errorValue(point, key)])];
+
+export function renderOutcomesChart(container, report, { style = 'bar' } = {}) {
   container.replaceChildren();
   const totals = report.outcomes, summary = outcomeTotals(totals);
   if (!summary.ok && !summary.errors) {
@@ -51,11 +58,25 @@ export function renderOutcomesChart(container, report) {
     card.append(name, element('strong', 'metrics-stat-value', value), element('small', '', note));
     stats.append(card);
   }
-  const legend = element('div', 'chart-legend');
-  for (const [, label, className] of [['ok', 'Successful calls', 'outcome-ok'], ...ERRORS]) {
-    const item = element('span'); item.append(element('i', `swatch ${className}`), document.createTextNode(label)); legend.append(item);
+  const line = style === 'line';
+  const legend = element('div', `chart-legend${line ? ' is-toggles' : ''}`);
+  for (const [key, label, className] of SERIES) {
+    const item = element(line ? 'button' : 'span', line && hidden.has(key) ? 'is-off' : '');
+    item.append(element('i', `swatch ${className}`), document.createTextNode(label));
+    if (line) {
+      item.type = 'button';
+      item.setAttribute('aria-pressed', String(!hidden.has(key)));
+      item.title = hidden.has(key) ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`;
+      item.addEventListener('click', () => {
+        if (hidden.has(key)) hidden.delete(key);
+        else if (SERIES.some(([other]) => other !== key && !hidden.has(other))) hidden.add(key);
+        renderOutcomesChart(container, report, { style });
+      });
+    }
+    legend.append(item);
   }
   container.append(stats, legend);
+  if (line) { renderLines(container, report); return; }
 
   const points = report.points;
   const w = 760, left = 56, right = 16, top = 16, plot = 220, h = top + plot + 34, inner = w - left - right;
@@ -95,6 +116,62 @@ export function renderOutcomesChart(container, report) {
   for (const i of new Set([0, Math.floor((points.length-1)/2), points.length-1])) {
     svg.append(svgNode('text', {x:x(i) + width/2, y:h-10, 'text-anchor':i === 0 ? 'start' : i === points.length-1 ? 'end' : 'middle', class:'chart-label'}, when(points[i].at)));
   }
+  container.append(svg, readout, countsTable(points));
+}
+
+function when(report) {
+  return at => new Date(at*1000).toLocaleString(undefined, report.step === 3600 ? {month:'short', day:'numeric', hour:'numeric'} : {month:'short', day:'numeric', year:report.step > 86400 ? 'numeric' : undefined});
+}
+
+function describe(report, point) {
+  const ok = point.responses + point.toolOk;
+  const errors = ERRORS.reduce((sum, [key]) => sum + errorValue(point, key), 0);
+  return `${when(report)(point.at)}: ${number(ok)} successful (${number(point.responses)} model responses, ${number(point.toolOk)} tool calls) · ${number(errors)} errors: ${number(point.toolError)} tool failed, ${number(point.connection)} connection, ${number(point.apiError + point.rateLimit)} API / rate limit`;
+}
+
+function renderLines(container, report) {
+  const points = report.points, visible = SERIES.filter(([key]) => !hidden.has(key));
+  const w = 760, left = 56, right = 16, top = 16, plot = 220, h = top + plot + 34, inner = w - left - right;
+  const max = niceMax(Math.max(1, ...points.flatMap(point => visible.map(([, , , value]) => value(point)))));
+  const x = i => left + (points.length === 1 ? inner/2 : i/(points.length-1)*inner), y = value => top + plot - value/max*plot;
+  const svg = svgNode('svg', {viewBox:`0 0 ${w} ${h}`, class:'metrics-chart outcomes-chart', role:'group', 'aria-label':`${visible.map(([, label]) => label).join(', ')} over time, one line each`});
+  for (const tick of [0, max/2, max]) {
+    if (max <= 1 && tick === max/2) continue;
+    svg.append(svgNode('line', {x1:left, x2:w-right, y1:y(tick), y2:y(tick), class:tick ? 'chart-grid' : 'chart-axis'}),
+      svgNode('text', {x:left-8, y:y(tick)+4, 'text-anchor':'end', class:'chart-label'}, compact(tick)));
+  }
+  // Errors draw last so they sit on top of the success line where they meet.
+  for (const [, , className, value] of visible) {
+    svg.append(svgNode('polyline', {points:points.map((point, i) => `${x(i)},${y(value(point))}`).join(' '), class:`outcome-line ${className}`}));
+  }
+  const readout = element('p', 'chart-readout', hidden.size ? 'Click a name above to show its line again. Hover or focus the chart for exact counts.' : 'Click a name above to hide its line; the scale adjusts. Hover or focus the chart for exact counts.');
+  readout.setAttribute('aria-live', 'polite');
+  const cursor = svgNode('g', {class:'chart-cursor', visibility:'hidden'});
+  cursor.append(svgNode('line', {y1:top, y2:top+plot, class:'chart-cursor-line'}));
+  const dots = visible.map(([, , className]) => svgNode('circle', {r:4, class:`outcome-dot ${className}`}));
+  cursor.append(...dots); svg.append(cursor);
+  const band = inner/Math.max(1, points.length-1);
+  points.forEach((point, i) => {
+    const label = describe(report, point);
+    const hit = svgNode('rect', {x:Math.max(left, x(i)-band/2), y:top, width:points.length === 1 ? inner : band, height:plot, class:'chart-hit', tabindex:0, 'aria-label':label});
+    hit.append(svgNode('title', {}, label));
+    const show = () => {
+      readout.textContent = label;
+      cursor.setAttribute('visibility', 'visible');
+      cursor.firstChild.setAttribute('x1', x(i)); cursor.firstChild.setAttribute('x2', x(i));
+      visible.forEach(([, , , value], index) => { dots[index].setAttribute('cx', x(i)); dots[index].setAttribute('cy', y(value(point))); });
+    };
+    hit.addEventListener('mouseenter', show); hit.addEventListener('focus', show);
+    svg.append(hit);
+  });
+  svg.addEventListener('mouseleave', () => cursor.setAttribute('visibility', 'hidden'));
+  for (const i of new Set([0, Math.floor((points.length-1)/2), points.length-1])) {
+    svg.append(svgNode('text', {x:x(i), y:h-10, 'text-anchor':i === 0 ? 'start' : i === points.length-1 ? 'end' : 'middle', class:'chart-label'}, when(report)(points[i].at)));
+  }
+  container.append(svg, readout, countsTable(points));
+}
+
+function countsTable(points) {
   const details = element('details', 'chart-data'); details.append(element('summary', '', 'Exact counts'));
   const wrap = element('div', 'metrics-table-wrap'), table = element('table', 'metrics-table metrics-daily-table'), head = element('thead'), header = element('tr');
   for (const label of ['Bucket starts (local time)', 'Model responses', 'Tool calls OK', 'Tool failed', 'Connection', 'Rate limited', 'Other API errors']) { const th = element('th', '', label); th.scope = 'col'; header.append(th); }
@@ -106,5 +183,5 @@ export function renderOutcomesChart(container, report) {
     body.append(row);
   }
   table.append(body); wrap.append(table); details.append(wrap);
-  container.append(svg, readout, details);
+  return details;
 }

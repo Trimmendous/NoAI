@@ -1,4 +1,5 @@
 mod adapters;
+mod chat_windows;
 mod control;
 mod daemon;
 mod digest;
@@ -8,6 +9,7 @@ mod ipc;
 mod local_metrics;
 mod local_sessions;
 mod platform;
+mod plugins;
 mod projects;
 mod providers;
 mod runtime;
@@ -23,6 +25,10 @@ use tauri::{
 
 pub fn run() {
     tauri::Builder::default()
+        // Plugin pages and files: noaiplugin://localhost/<id>/<file>
+        .register_uri_scheme_protocol("noaiplugin", |_context, request| {
+            crate::plugins::respond(request.uri().path())
+        })
         .setup(|app| {
             ipc::ensure_started(app.handle()).map_err(std::io::Error::other)?;
             let show = MenuItem::with_id(app, "show", "Show Noai", true, None::<&str>)?;
@@ -65,6 +71,8 @@ pub fn run() {
             runtime::get_activity_metrics,
             local_sessions::list_local_sessions,
             local_sessions::get_local_session,
+            runtime::get_job_instructions,
+            runtime::set_job_instructions,
             runtime::list_scheduled_tasks,
             runtime::create_scheduled_task,
             runtime::edit_scheduled_task,
@@ -73,6 +81,16 @@ pub fn run() {
             runtime::resume_scheduled_task,
             runtime::retry_scheduled_task,
             runtime::open_web_link,
+            runtime::list_plugins,
+            runtime::set_plugin_enabled,
+            runtime::create_example_plugin,
+            runtime::delete_plugin,
+            runtime::open_plugins_folder,
+            chat_windows::open_chat_window,
+            chat_windows::focus_chat_window,
+            chat_windows::close_chat_window,
+            runtime::get_wake_status,
+            runtime::set_wake_for_jobs,
             runtime::get_digest,
             runtime::set_digest,
             runtime::run_digest_now,

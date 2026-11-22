@@ -265,12 +265,16 @@ pub fn spawn(request: &RunRequest) -> Result<Child, String> {
 }
 
 pub fn parse_line(request: &RunRequest, line: &str) -> Vec<RunEvent> {
+    let Some(harness) = crate::harness::get(&request.harness) else {
+        return Vec::new();
+    };
+    if let Some(events) = harness.parse_text(request, line) {
+        return events;
+    }
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return Vec::new();
     };
-    crate::harness::get(&request.harness)
-        .map(|harness| harness.parse(request, &value))
-        .unwrap_or_default()
+    harness.parse(request, &value)
 }
 
 /// Only schedules retries for explicit temporary provider limits with a stated delay.

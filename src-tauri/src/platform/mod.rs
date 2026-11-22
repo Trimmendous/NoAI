@@ -7,6 +7,10 @@
 //! - `linux.rs`   XDG data directory, systemd user service, distro install locations
 //! - `windows.rs` %APPDATA% data directory, job-tree kill, npm/winget locations
 //!
+//! Sleep: `keep_awake(pid)` holds the machine awake while an agent process
+//! runs; `set_wake(at)` asks the OS to wake it for the next job. Waking needs
+//! a one-time admin approval on macOS and Linux (`enable_wake`).
+//!
 //! The local control socket (`control.rs`/`ipc.rs`) is still Unix-only; a named-pipe
 //! transport is required before the Windows build is usable.
 
@@ -37,7 +41,34 @@ pub use family::{
     file_identity, isolate_process_group, kill_process_tree, restrict_dir, restrict_new_file,
     sync_parent_dir,
 };
-pub use os::{managed_by_service, start_user_service};
+pub use os::{
+    disable_wake, enable_wake, keep_awake, managed_by_service, set_wake, start_user_service,
+    wake_enabled, KeepAwake,
+};
+
+/// Whether this computer can be woken for jobs, and how it's set up. Shown in
+/// Settings › Automation.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WakeStatus {
+    pub supported: bool,
+    pub enabled: bool,
+    /// What turning it on does, in plain English, for this OS.
+    pub detail: &'static str,
+}
+
+pub fn wake_status() -> WakeStatus {
+    WakeStatus {
+        supported: os::WAKE_SUPPORTED,
+        enabled: os::WAKE_SUPPORTED && wake_enabled(),
+        detail: os::WAKE_DETAIL,
+    }
+}
+
+/// Shows a folder in Finder / Files / Explorer.
+pub fn open_folder(path: &Path) -> std::io::Result<()> {
+    os::open_url(&path.to_string_lossy())
+}
 
 /// Opens an http(s) link in the default browser. Anything else is refused.
 pub fn open_web_link(url: &str) -> Result<(), String> {

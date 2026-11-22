@@ -69,11 +69,6 @@
 .notice { padding: 12px 16px; border: 0; border-radius: var(--radius-md); color: var(--ink-soft); background: var(--surface); box-shadow: var(--card-shadow); font-size: 13px; line-height: 1.5; }
 
 /* Details panel. */
-.details-content h3 { margin: 0 0 8px; color: var(--ink-muted); font-size: 12px; font-weight: 600; }
-.details-content p { overflow-wrap: anywhere; }
-.details-content dl { margin: 0 0 22px; }
-.details-content dt { margin-top: 12px; color: var(--ink-muted); font-size: 12px; }
-.details-content dd { overflow-wrap: anywhere; margin: 2px 0 0; color: var(--ink); font-size: 13px; }
 .detail-item { margin-bottom: 18px; }
 .detail-value { margin: 4px 0 0; font-size: 13px; }
 .detail-note { padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: 12px; line-height: 1.55; }
@@ -142,8 +137,8 @@
 .activity-time { display: block; margin-top: 6px; color: var(--ink-muted); font-size: 12px; }
 
 /* Dialogs, in the style of a macOS sheet. */
-.settings-dialog, .model-dialog, .edit-dialog { width: min(460px, calc(100vw - 30px)); max-height: min(720px, calc(100dvh - 30px)); padding: 0; border: 0; border-radius: 14px; color: var(--ink); background: var(--surface); box-shadow: var(--raised-shadow), 0 24px 70px var(--shadow-strong); }
-.settings-dialog::backdrop, .model-dialog::backdrop, .edit-dialog::backdrop { background: var(--overlay); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.model-dialog, .edit-dialog { width: min(460px, calc(100vw - 30px)); max-height: min(720px, calc(100dvh - 30px)); padding: 0; border: 0; border-radius: 14px; color: var(--ink); background: var(--surface); box-shadow: var(--raised-shadow), 0 24px 70px var(--shadow-strong); }
+.model-dialog::backdrop, .edit-dialog::backdrop { background: var(--overlay); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 22px 4px; }
 .dialog-heading h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
 .dialog-body { display: grid; gap: 20px; padding: 14px 22px 22px; }
@@ -218,3 +213,84 @@ select.text-field, select.ui-popup, .scheduled-field select, .metrics-controls s
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 14' fill='none' stroke='%238e8e93' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 5l3-3 3 3M2 9l3 3 3-3'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 10px center; background-size: 9px 13px;
 }
+
+/* Settings: standing job instructions. */
+.settings-legend { margin: 0; font-size: 13px; font-weight: 600; }
+.job-instructions-group { display: grid; gap: 6px; }
+.job-instructions-group > p { margin: 2px 0 6px; color: var(--ink-muted); font-size: 12px; }
+.job-instructions-field { width: 100%; min-height: 84px; resize: vertical; line-height: 1.45; }
+.job-instructions-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 4px; }
+.job-instructions-actions .field-help { flex: 1; margin: 0; }
+
+/* Settings page: a section list on the left (like System Settings), the
+   chosen section on the right. Below 760px the list becomes a row of tabs. */
+.settings-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 28px; align-items: start; }
+.settings-nav { position: sticky; top: 0; display: grid; gap: 2px; padding: 6px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--card-shadow); }
+.settings-nav-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; color: var(--ink); background: transparent; text-align: left; }
+.settings-nav-item:hover { background: var(--fill); }
+.settings-nav-item.is-active { background: var(--accent-soft); }
+.settings-nav-item.is-active strong { color: var(--accent); }
+.settings-nav-copy { display: grid; min-width: 0; }
+.settings-nav-copy strong { font-size: 13px; font-weight: 600; }
+.settings-nav-copy small { overflow: hidden; color: var(--ink-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-tile.settings-tile-appearance { --tile: var(--tile-home); }
+.ui-tile.settings-tile-jobs { --tile: var(--tile-jobs); }
+.ui-tile.settings-tile-accessibility { --tile: var(--tile-models); }
+.ui-tile.settings-tile-plugins { --tile: var(--tile-jobs); }
+.ui-tile.settings-tile-automation { --tile: var(--tile-accounts); }
+.settings-pane { min-width: 0; max-width: 640px; }
+.settings-section-title { margin: 2px 0 4px; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+.settings-section-lead { margin: 0 0 20px; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }
+.settings-section .ui-group + .ui-group { margin-top: 22px; }
+.settings-card { padding: 16px; }
+.settings-note { margin: 14px 0 0; color: var(--ink-muted); font-size: 12px; }
+
+/* Theme choices as little window previews. */
+.theme-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.theme-choice { position: relative; display: grid; gap: 7px; justify-items: center; cursor: pointer; color: var(--ink-muted); font-size: 12px; }
+.theme-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.theme-preview { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 9px; box-shadow: 0 0 0 1px var(--line-strong); transition: box-shadow .15s var(--ease); }
+.theme-preview i { position: absolute; display: block; border-radius: 3px; }
+.theme-preview i:nth-child(1) { inset: 0 auto 0 0; width: 28%; border-radius: 0; }
+.theme-preview i:nth-child(2) { top: 18%; left: 36%; width: 52%; height: 14%; }
+.theme-preview i:nth-child(3) { top: 42%; left: 36%; width: 36%; height: 30%; }
+.theme-preview-light { background: #f5f5f7; }
+.theme-preview-light i:nth-child(1) { background: #e4e4e9; }
+.theme-preview-light i:nth-child(2), .theme-preview-light i:nth-child(3) { background: #fff; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .1); }
+.theme-preview-dark { background: #111112; }
+.theme-preview-dark i:nth-child(1) { background: #1f1f22; }
+.theme-preview-dark i:nth-child(2), .theme-preview-dark i:nth-child(3) { background: #2c2c2e; }
+.theme-preview-system { background: linear-gradient(135deg, #f5f5f7 50%, #111112 50%); }
+.theme-preview-system i:nth-child(1) { background: linear-gradient(135deg, #e4e4e9 50%, #1f1f22 50%); }
+.theme-preview-system i:nth-child(2), .theme-preview-system i:nth-child(3) { background: rgba(127, 127, 135, .35); }
+.theme-preview-matrix { background: repeating-linear-gradient(90deg, transparent 0 9px, rgba(0, 230, 92, .45) 9px 10px, transparent 10px 19px), linear-gradient(#000, #021a0a); }
+.theme-preview-matrix i:nth-child(1) { background: rgba(0, 20, 6, .85); }
+.theme-preview-matrix i:nth-child(2), .theme-preview-matrix i:nth-child(3) { background: rgba(0, 230, 92, .3); box-shadow: 0 0 0 .5px rgba(0, 255, 102, .5); }
+.theme-choice:has(input:checked) { color: var(--ink); font-weight: 600; }
+.theme-choice input:checked + .theme-preview { box-shadow: 0 0 0 2.5px var(--accent); }
+.theme-choice input:focus-visible + .theme-preview { outline: 3px solid var(--focus); outline-offset: 3px; }
+.settings-view .job-instructions-field { display: block; width: 100%; min-height: 110px; padding: 0; border: 0; resize: vertical; color: var(--ink); background: transparent; font: inherit; line-height: 1.5; outline: none; }
+.settings-view .job-instructions-group .ui-group + .ui-group { margin-top: 22px; }
+.settings-view .job-instructions-actions { margin-top: 16px; }
+
+@media (max-width: 760px) {
+  .settings-layout { grid-template-columns: 1fr; gap: 18px; }
+  .settings-nav { position: static; display: flex; overflow-x: auto; }
+  .settings-nav-item { flex: 1 0 auto; width: auto; }
+  .settings-nav-copy small { display: none; }
+  .theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.settings-back { margin-bottom: 14px; }
+.settings-view .ui-row-subtitle { overflow: visible; white-space: normal; text-overflow: clip; }
+.secondary-button.is-destructive { color: var(--error); }
+.secondary-button.is-destructive.is-confirming { color: #fff; background: var(--error); }
+
+/* Theme picker: search and pages when plugins add many themes. */
+.theme-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.theme-search { flex: 1; min-width: 0; padding: 7px 12px; border: 0; border-radius: var(--radius-sm); color: var(--ink); background: var(--fill); font: inherit; outline: none; }
+.theme-search:focus { box-shadow: 0 0 0 3px var(--focus); }
+.theme-count { flex: none; color: var(--ink-muted); font-size: 12px; }
+.theme-choice[hidden] { display: none; }
+.theme-empty { margin: 4px 0 0; color: var(--ink-muted); }
+.theme-pages { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; color: var(--ink-muted); font-size: 12px; }
+.secondary-button.is-compact { min-height: 28px; padding: 4px 12px; font-size: 12px; }

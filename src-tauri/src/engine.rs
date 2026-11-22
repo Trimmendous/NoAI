@@ -1,7 +1,9 @@
 use crate::adapters::{self, RunEvent, RunRequest};
 use crate::{
     providers,
-    scheduled_tasks::{CreateTaskInput, DigestInput, ScheduledTasks, Task, TaskRun},
+    scheduled_tasks::{
+        CreateTaskInput, DigestInput, JobInstructions, ScheduledTasks, Task, TaskRun,
+    },
     scheduler::{self, ResumeJob, Scheduler},
 };
 use std::{
@@ -335,6 +337,17 @@ pub fn get_resume_jobs(engine: Arc<Engine>) -> Vec<ResumeJob> {
     engine.scheduler.jobs()
 }
 
+pub fn get_job_instructions(engine: Arc<Engine>) -> JobInstructions {
+    engine.scheduled_tasks.instructions()
+}
+
+pub fn set_job_instructions(
+    engine: Arc<Engine>,
+    input: JobInstructions,
+) -> Result<JobInstructions, String> {
+    engine.scheduled_tasks.set_instructions(input)
+}
+
 pub fn list_scheduled_tasks(engine: Arc<Engine>) -> Vec<Task> {
     engine.scheduled_tasks.list()
 }
@@ -535,6 +548,8 @@ async fn execute(
     scheduled_run_id: Option<&str>,
 ) -> ExecutionOutcome {
     let mut cancel_rx = cancel_rx;
+    // Keep the computer from sleeping until this agent process exits.
+    let _awake = crate::platform::keep_awake(child.id().unwrap_or_default());
     let Some(mut stdin) = child.stdin.take() else {
         kill_tree(child.id());
         let _ = child.wait().await;
@@ -650,15 +665,25 @@ async fn execute(
         }
         summary
     });
+    let notice_request = request.clone();
     let errors = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         let mut last_error = String::new();
+        let mut notices: Vec<String> = Vec::new();
+        let harness = crate::harness::get(&notice_request.harness);
         while let Ok(Some(line)) = lines.next_line().await {
             if !line.trim().is_empty() {
                 last_error = line.chars().take(1000).collect();
+                if let Some(notice) =
+                    harness.and_then(|agent| agent.stderr_notice(&notice_request, &line))
+                {
+                    if !notices.contains(&notice) {
+                        notices.push(notice);
+                    }
+                }
             }
         }
-        last_error
+        (last_error, notices)
     });
 
     let (cancelled, exit_result) = tokio::select! {
@@ -668,8 +693,23 @@ async fn execute(
         }
         result = child.wait() => (false, result)
     };
-    let summary = output.await.unwrap_or_default();
-    let stderr = errors.await.unwrap_or_default();
+    let mut summary = output.await.unwrap_or_default();
+    let (stderr, notices) = errors.await.unwrap_or_default();
+    // Warnings the CLI printed on stderr, shown with the run even when it succeeds.
+    for text in notices {
+        let mut event = RunEvent::new(request, "notice", Some(text));
+        if let Some(id) = resume_job_id {
+            let _ = engine.scheduler.append_event(id, &mut event);
+        } else {
+            summary.next_event_id += 1;
+            event.event_id = Some(summary.next_event_id);
+        }
+        if let Some(id) = scheduled_run_id {
+            let _ = engine.scheduled_tasks.append_event(id, &event);
+        }
+        summary.events.push(event.clone());
+        engine.emit_run(event);
+    }
     let terminal = if let Some(error) = &summary.journal_error {
         RunEvent::new(
             request,
@@ -834,12 +874,92 @@ async fn finish_run(
     terminal
 }
 
+/// The next moment any job is due: a scheduled run or a rate-limit retry.
+fn next_due(engine: &Engine) -> Option<u64> {
+    let retries = engine
+        .scheduler
+        .jobs()
+        .into_iter()
+        .filter(|job| job.status == "waiting")
+        .filter_map(|job| job.retry_at);
+    engine
+        .scheduled_tasks
+        .next_due()
+        .into_iter()
+        .chain(retries)
+        .min()
+}
+
+/// When to ask the OS to wake the computer: a minute before the next job.
+/// Nothing when wake-ups are off or the job is only a few minutes away (the
+/// computer is awake now, and a run in progress keeps it awake).
+fn wake_target(next_due: Option<u64>, now: u64, enabled: bool) -> Option<u64> {
+    next_due
+        .filter(|due| enabled && *due > now + 180)
+        .map(|due| due - 60)
+}
+
+/// After a wake-up the computer must not doze off again before the job
+/// starts, so while waking is on it is held awake for the last few minutes
+/// before anything is due. A job every few minutes keeps it awake throughout.
+fn hold_until_due(next_due: Option<u64>, now: u64, enabled: bool) -> bool {
+    enabled && next_due.is_some_and(|due| due <= now + 180)
+}
+
+/// Keeps the OS wake-up pointed at the next job. Whether wake-ups are allowed
+/// is rechecked each minute, so turning it on in Settings applies quickly.
+#[derive(Default)]
+struct WakePlan {
+    enabled: bool,
+    checked_at: u64,
+    current: Option<u64>,
+    failed: bool,
+    /// Held from shortly before a job until it starts (the run then holds its own).
+    hold: Option<crate::platform::KeepAwake>,
+}
+
+impl WakePlan {
+    async fn update(&mut self, engine: &Engine, now: u64) {
+        if now >= self.checked_at + 60 {
+            self.checked_at = now;
+            self.enabled = tokio::task::spawn_blocking(crate::platform::wake_enabled)
+                .await
+                .unwrap_or(false);
+        }
+        let due = next_due(engine);
+        if hold_until_due(due, now, self.enabled) {
+            if self.hold.is_none() {
+                self.hold = crate::platform::keep_awake(std::process::id());
+            }
+        } else {
+            self.hold = None;
+        }
+        let target = wake_target(due, now, self.enabled);
+        if target == self.current || (!self.enabled && self.current.is_none()) {
+            return;
+        }
+        match tokio::task::spawn_blocking(move || crate::platform::set_wake(target)).await {
+            Ok(Ok(())) => {
+                self.current = target;
+                self.failed = false;
+            }
+            Ok(Err(error)) if !self.failed => {
+                self.failed = true;
+                eprintln!("Noai: could not schedule a wake-up: {error}");
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn start_scheduler(engine: Arc<Engine>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        let mut wake = WakePlan::default();
         loop {
             interval.tick().await;
             let now = scheduler::now_epoch();
+            wake.update(&engine, now).await;
             run_scheduled_due(&engine).await;
             let claims = match engine.scheduler.claim_due(now) {
                 Ok(claims) => claims,
@@ -1061,6 +1181,24 @@ fn terminal_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wakes_a_minute_before_jobs_that_are_far_enough_away() {
+        assert_eq!(wake_target(Some(10_000), 1_000, true), Some(9_940));
+        assert_eq!(wake_target(Some(1_100), 1_000, true), None);
+        assert_eq!(wake_target(Some(10_000), 1_000, false), None);
+        assert_eq!(wake_target(None, 1_000, true), None);
+    }
+
+    #[test]
+    fn stays_awake_from_the_wake_up_until_the_job_starts() {
+        // Woken 60s early: held until the job is claimed.
+        assert!(hold_until_due(Some(1_060), 1_000, true));
+        // Far away: free to sleep, the next wake-up is set instead.
+        assert!(!hold_until_due(Some(5_000), 1_000, true));
+        // Waking off: Noai doesn't hold the computer between runs.
+        assert!(!hold_until_due(Some(1_060), 1_000, false));
+    }
 
     #[test]
     fn scheduled_execution_adds_context_without_changing_job_instructions() {

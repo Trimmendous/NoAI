@@ -1,0 +1,56 @@
+/* Accessibility (Settings › Accessibility). Colour-vision modes swap every
+   colour that carries meaning (status, chart series, error types) for
+   Okabe-Ito-based palettes checked with a colour-blindness simulator; charts
+   also keep their legends and exact-value tables. The extra attribute
+   selectors outrank the theme and palette rules. */
+
+/* Red-green (protanopia / deuteranopia): blue and orange instead of green and red. */
+:root[data-vision='red-green'][data-theme] {
+  --success: #0072b2; --error: #d55e00; --warning: #b26b00;
+  --chart-input: #0072b2; --chart-cache: #e69f00; --chart-output: #56b4e9;
+  --outcome-tool: #e69f00; --outcome-connection: #d55e00; --outcome-api: #cc79a7;
+}
+:root[data-vision='red-green'][data-theme='dark'] {
+  --success: #5aa9ff; --error: #ff7a45; --warning: #f0a020;
+  --chart-input: #006bbb; --chart-cache: #c8800d; --chart-output: #32a0c5;
+  --outcome-tool: #cc7200; --outcome-connection: #af2c1f; --outcome-api: #b9649f;
+}
+/* Blue-yellow (tritanopia): red, green and pink; nothing relies on blue vs yellow. */
+:root[data-vision='blue-yellow'][data-theme] {
+  --success: #007a59; --error: #d55e00; --warning: #a8467f;
+  --chart-input: #d55e00; --chart-cache: #009e73; --chart-output: #cc79a7;
+  --outcome-tool: #d55e00; --outcome-connection: #8e1b5b; --outcome-api: #cc79a7;
+}
+:root[data-vision='blue-yellow'][data-theme='dark'] {
+  --success: #3cc59a; --error: #ff7a45; --warning: #e08cc8;
+  --chart-input: #cc572a; --chart-cache: #249c74; --chart-output: #b55b9a;
+  --outcome-tool: #cc572a; --outcome-connection: #9e366f; --outcome-api: #bb76b5;
+}
+
+/* Increase contrast: darker secondary text and visible separators. */
+:root[data-contrast='more'][data-theme] { --ink-soft: #2c2c2e; --ink-muted: #3a3a3c; --line: #a1a1a6; --line-strong: #6e6e73; --fill: rgba(60, 60, 67, .2); }
+:root[data-contrast='more'][data-theme='dark'] { --ink-soft: #ebebf0; --ink-muted: #d1d1d6; --line: #636366; --line-strong: #8e8e93; --fill: rgba(235, 235, 245, .22); }
+:root[data-contrast='more'] :focus-visible { outline-width: 3px; }
+
+/* Reduce motion, even when the system setting is off. */
+:root[data-motion='reduce'] *, :root[data-motion='reduce'] *::before, :root[data-motion='reduce'] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+
+/* Settings controls */
+.text-size-row { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 12px; }
+.text-size-row .small-a { font-size: 12px; color: var(--ink-muted); }
+.text-size-row .large-a { font-size: 19px; color: var(--ink-muted); }
+.text-size-row output { min-width: 44px; font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+.text-size-slider { width: 100%; accent-color: var(--accent); }
+.vision-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.vision-choice { position: relative; display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-md); background: var(--surface-subtle); cursor: pointer; }
+.vision-choice input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.vision-choice:has(input:checked) { box-shadow: 0 0 0 2px var(--accent); background: var(--accent-soft); }
+.vision-choice:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
+.vision-swatches { display: flex; gap: 4px; }
+.vision-swatches i { width: 18px; height: 18px; border-radius: 5px; }
+.vision-choice strong { font-size: 13px; }
+.vision-choice small { color: var(--ink-muted); font-size: 11.5px; }
+.vision-default i:nth-child(1) { background: #34c759; } .vision-default i:nth-child(2) { background: #ff3b30; } .vision-default i:nth-child(3) { background: #ff9500; }
+.vision-red-green i:nth-child(1) { background: #0072b2; } .vision-red-green i:nth-child(2) { background: #d55e00; } .vision-red-green i:nth-child(3) { background: #e69f00; }
+.vision-blue-yellow i:nth-child(1) { background: #009e73; } .vision-blue-yellow i:nth-child(2) { background: #d55e00; } .vision-blue-yellow i:nth-child(3) { background: #cc79a7; }
+@media (max-width: 760px) { .vision-options { grid-template-columns: 1fr; } }

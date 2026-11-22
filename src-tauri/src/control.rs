@@ -70,6 +70,11 @@ mod unix {
             since: u64,
         },
         GetDigest,
+        GetJobInstructions,
+        ReloadPlugins,
+        SetJobInstructions {
+            input: crate::scheduled_tasks::JobInstructions,
+        },
         SetDigest {
             input: crate::scheduled_tasks::DigestInput,
         },
@@ -328,6 +333,16 @@ mod unix {
             Request::Resume { id } => result(engine::resume_scheduled_task(engine, id)),
             Request::Runs { id } => result(engine::get_scheduled_task_runs(engine, id)),
             Request::GetDigest => json!({"ok": true, "data": engine::get_digest(engine)}),
+            Request::ReloadPlugins => {
+                crate::harness::reload_plugins();
+                json!({"ok": true, "data": null})
+            }
+            Request::GetJobInstructions => {
+                json!({"ok": true, "data": engine::get_job_instructions(engine)})
+            }
+            Request::SetJobInstructions { input } => {
+                result(engine::set_job_instructions(engine, input))
+            }
             Request::SetDigest { input } => result(engine::set_digest(engine, input)),
             Request::RunDigestNow => result(engine::run_digest_now(engine)),
             Request::RetryTask {
@@ -356,7 +371,7 @@ mod unix {
             }
             Request::PollEvents { since } => json!({"ok": true, "data": events.since(since)}),
             Request::Ping => {
-                json!({"ok": true, "data": {"daemon": true,"pid":std::process::id(),"managedBySystemd":std::env::var_os("INVOCATION_ID").is_some(),"managedByService":crate::platform::managed_by_service()}})
+                json!({"ok": true, "data": {"daemon": true,"build":crate::ipc::build_stamp(),"pid":std::process::id(),"managedBySystemd":std::env::var_os("INVOCATION_ID").is_some(),"managedByService":crate::platform::managed_by_service()}})
             }
             Request::Shutdown => {
                 if !engine.active_runs.snapshot().is_empty() {

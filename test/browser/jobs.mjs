@@ -35,7 +35,7 @@ try {
  const nav=async name=>{await page.locator(`[data-view="${name}"]`).first().evaluate(n=>n.click());};
  for(const theme of ['light','dark']) for(const width of [1280,390]) {
   await page.setViewportSize({width,height:900});
-  if (await page.evaluate(()=>document.documentElement.dataset.theme)!==theme) await page.locator('#theme-toggle').click();
+  if (await page.evaluate(()=>document.documentElement.dataset.theme)!==theme) {await page.evaluate(t=>{const input=document.querySelector(`#theme-options input[value="${t}"]`);input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));},theme);}
   await page.emulateMedia({reducedMotion:'reduce'});
   await nav('home'); await page.locator('.main-content').evaluate(n=>n.scrollTop=0); await page.screenshot({path:`${output}/home-${theme}-${width}.png`});
   await page.locator('.metrics-figure').first().scrollIntoViewIfNeeded();

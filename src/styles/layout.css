@@ -69,11 +69,6 @@
 .messages { flex: 1; overflow: auto; width: 100%; padding: 28px max(24px, calc((100% - 760px) / 2)); }
 .chat-welcome { display: flex; flex-direction: column; align-items: center; flex: 1; justify-content: center; width: 100%; max-width: 620px; margin: auto; padding: 34px 20px 25px; text-align: center; }
 .composer-dock { flex: none; width: min(100%, 820px); margin: 0 auto; padding: 0 24px 18px; }
-.details-panel { flex: 0 0 290px; min-width: 0; overflow: auto; border-left: 1px solid var(--line); background: var(--surface); }
-.details-heading { display: flex; align-items: center; justify-content: space-between; min-height: 64px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
-.details-heading h2 { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
-.details-content { padding: 20px; }
-.details-empty { margin: 0; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }
 
 /* Pages: a large bold title, a one-line subtitle, then grouped cards. */
 .page-view { width: min(100%, 900px); min-height: 100%; margin: 0 auto; padding: 44px 40px 80px; }
@@ -88,3 +83,31 @@
 /* With the grouped nav, short windows scroll the sidebar instead of overlapping. */
 .sidebar { overflow-y: auto; overscroll-behavior: contain; }
 .conversation-section { min-height: 140px; }
+
+/* Big windows: the sidebar and pages grow instead of leaving empty space. */
+@media (min-width: 1440px) {
+  .sidebar { flex-basis: clamp(236px, 15vw, 300px); }
+  .page-view { width: min(100%, 1040px); }
+}
+@media (min-width: 1800px) { .page-view { width: min(100%, 1180px); } }
+
+/* Chats grouped by date. */
+.conversation-group { margin: 12px 10px 2px; color: var(--ink-muted); font-size: 11px; font-weight: 600; }
+.conversation-group:first-child { margin-top: 2px; }
+
+/* Usage limits at the bottom of the sidebar, only when there's room for them. */
+.sidebar-limits { display: grid; flex: none; gap: 10px; margin: 10px 0 8px; padding: 12px; border: 0; border-radius: var(--radius-md); color: var(--ink); background: var(--fill); text-align: left; cursor: pointer; }
+.sidebar-limits:hover { background: var(--fill-hover); }
+.sidebar-limits[hidden] { display: none; }
+.sidebar-limits-title { color: var(--ink-muted); font-size: 11px; font-weight: 600; }
+.sidebar-limit { display: grid; gap: 4px; }
+.sidebar-limit-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.sidebar-limit-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-limit-head strong { font-variant-numeric: tabular-nums; }
+.sidebar-limit-bar { height: 5px; overflow: hidden; border-radius: var(--radius-pill); background: var(--fill-hover); }
+.sidebar-limit-bar span { display: block; height: 100%; border-radius: inherit; background: var(--success); }
+.sidebar-limit.is-warn .sidebar-limit-bar span { background: var(--warning); }
+.sidebar-limit.is-bad .sidebar-limit-bar span { background: var(--error); }
+.sidebar-limit small { color: var(--ink-muted); font-size: 11px; }
+@media (max-height: 899px) { .sidebar-limits { display: none; } }
+body.sidebar-collapsed .sidebar-limits { display: none; }

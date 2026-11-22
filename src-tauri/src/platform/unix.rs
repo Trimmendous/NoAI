@@ -100,3 +100,118 @@ pub fn login_shell_lookup(name: &str) -> Option<PathBuf> {
         .find(|line| line.starts_with('/'))
         .map(PathBuf::from)
 }
+
+/// Holds the computer awake until dropped or until the watched process exits.
+/// It wraps the OS helper process (caffeinate / systemd-inhibit).
+pub struct KeepAwake(std::process::Child);
+
+impl Drop for KeepAwake {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Starts a helper that keeps the machine awake; `None` if it isn't installed.
+pub fn spawn_keep_awake(program: &str, args: &[String]) -> Option<KeepAwake> {
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()
+        .map(KeepAwake)
+}
+
+/// Where Noai's one sudoers rule lives. It allows only the wake commands.
+pub const SUDOERS_FILE: &str = "/etc/sudoers.d/noai-wake";
+
+/// The login name, checked to be safe to write into a sudoers rule.
+pub fn user_name() -> Option<String> {
+    let valid = |name: &str| {
+        !name.is_empty()
+            && name.len() <= 64
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    if let Ok(name) = std::env::var("USER") {
+        if valid(&name) {
+            return Some(name);
+        }
+    }
+    // SAFETY: getpwuid returns a pointer to static storage or null; it is read
+    // immediately and not kept.
+    unsafe {
+        let entry = libc::getpwuid(libc::getuid());
+        if entry.is_null() {
+            return None;
+        }
+        let name = std::ffi::CStr::from_ptr((*entry).pw_name)
+            .to_string_lossy()
+            .into_owned();
+        valid(&name).then_some(name)
+    }
+}
+
+/// True when `sudo` allows `args` without asking for a password.
+pub fn sudo_allows(args: &[&str]) -> bool {
+    Command::new("/usr/bin/sudo")
+        .arg("-n")
+        .arg("-l")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// Runs `args` through `sudo -n`, which fails instead of prompting.
+pub fn sudo_run(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("/usr/bin/sudo")
+        .arg("-n")
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Cannot run sudo: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+/// A root shell script that checks `rule` with visudo, then installs it as
+/// Noai's sudoers file. A rule that fails the check is never installed.
+pub fn install_rule_script(rule: &str, group: &str) -> Result<String, String> {
+    if rule.contains('\'') || rule.contains('\n') {
+        return Err("Unexpected characters in the sudoers rule".into());
+    }
+    Ok(format!(
+        "tmp=$(mktemp) && printf '%s\\n' '{rule}' > \"$tmp\" && visudo -cf \"$tmp\" >/dev/null && install -m 0440 -o root -g {group} \"$tmp\" {SUDOERS_FILE}; status=$?; rm -f \"$tmp\"; exit $status"
+    ))
+}
+
+pub fn remove_rule_script() -> String {
+    format!("rm -f {SUDOERS_FILE}")
+}
+
+#[cfg(test)]
+mod wake_tests {
+    use super::*;
+
+    #[test]
+    fn sudoers_script_checks_the_rule_before_installing_it() {
+        let script = install_rule_script(
+            "me ALL=(root) NOPASSWD: /usr/bin/pmset schedule wake *",
+            "wheel",
+        )
+        .unwrap();
+        let check = script.find("visudo -cf").unwrap();
+        let install = script.find("install -m 0440").unwrap();
+        assert!(check < install && script.contains(SUDOERS_FILE));
+        assert!(install_rule_script("me' ALL", "wheel").is_err());
+    }
+}

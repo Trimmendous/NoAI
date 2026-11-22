@@ -47,7 +47,7 @@ try {
  await page.waitForFunction(()=>document.querySelector('#metrics-chart svg'));
  assert.ok(await page.locator('#view-home').isVisible());
  const calls=await page.evaluate(()=>window.__fixture.metricsCalls);
- for(const range of ['24h','31d','all','7d'])await page.selectOption('#metrics-range',range);
+ for(const range of ['24h','30d','all','7d'])await page.selectOption('#metrics-range',range);
  await page.selectOption('#metrics-style','line');assert.equal(await page.locator('#metrics-chart polyline').count(),3);
  await page.selectOption('#metrics-style','bar');assert.ok(await page.locator('#metrics-chart rect').count()>0);
  assert.equal(await page.evaluate(()=>window.__fixture.metricsCalls),calls,'Chart controls must not rescan history');
@@ -75,7 +75,7 @@ try {
  await page.screenshot({path:`${out}/job-conversation.png`});
  await page.locator('#job-conversation-back').click();assert.equal(await page.locator('.job-run-picker select').inputValue(),'job-0-1');
  for(const theme of ['dark','light']) {
-  if(await page.evaluate(()=>document.documentElement.dataset.theme)!==theme)await page.locator('#theme-toggle').click();
+  if(await page.evaluate(()=>document.documentElement.dataset.theme)!==theme){await page.evaluate(t=>{const input=document.querySelector(`#theme-options input[value="${t}"]`);input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));},theme);}
   assert.equal(await page.evaluate(()=>document.documentElement.dataset.theme),theme);
   await page.setViewportSize({width:390,height:844});
   await sticky('#job-back');

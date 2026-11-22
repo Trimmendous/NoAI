@@ -63,3 +63,8 @@
   .sessions-search { flex-basis: 100%; }
   .sessions-toolbar > label:not(.sessions-search) { min-width: 120px; }
 }
+
+/* Filters under the search: model, folder and how recent. */
+.sessions-filter-bar { flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.sessions-filter-bar select { max-width: 240px; }
+.sessions-filter-bar label { flex: none; margin: 0; }

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Noai chat</title>
+    <script src="./js/theme-init.js"></script>
+    <link rel="stylesheet" href="./styles/main.css" />
+    <script src="./js/chat-window.js" type="module"></script>
+  </head>
+  <body class="chat-window-body">
+    <canvas id="matrix-rain" class="matrix-rain" aria-hidden="true" hidden></canvas>
+    <div class="chat-window">
+      <header class="chat-window-head">
+        <button id="dock-handle" class="chat-window-handle" type="button" draggable="true" title="Drag onto Noai to dock this chat back, or click to dock it beside the current chat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1" /><circle cx="15" cy="6" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="18" r="1" /><circle cx="15" cy="18" r="1" /></svg>
+          <span>Dock</span>
+        </button>
+        <div class="chat-window-copy"><h1 id="chat-window-title">Loading chat…</h1><p id="chat-window-meta"></p></div>
+      </header>
+      <div id="chat-window-messages" class="messages" role="log" aria-live="polite"></div>
+      <div class="composer-dock">
+        <form id="chat-window-form" class="composer" autocomplete="off">
+          <label for="chat-window-input" class="sr-only">Message</label>
+          <textarea id="chat-window-input" rows="3" placeholder="Reply…" aria-describedby="chat-window-status"></textarea>
+          <div class="composer-toolbar">
+            <div class="composer-selects"></div>
+            <div class="composer-actions">
+              <button id="chat-window-stop" class="stop-button" type="button" hidden>Stop</button>
+              <button id="chat-window-send" class="send-button" type="submit" aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" /></svg></button>
+            </div>
+          </div>
+        </form>
+        <p id="chat-window-status" class="composer-status" role="status">Connecting to Noai…</p>
+      </div>
+    </div>
+  </body>
+</html>

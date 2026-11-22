@@ -21,6 +21,24 @@ pub struct ProviderUsageWindow {
     pub limit: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resets_at: Option<u64>,
+    /// How long the window lasts, as the provider reports it (a 5-hour or a
+    /// weekly limit today, but never assumed). `None` when it isn't reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<u64>,
+}
+
+/// "5-hour limit", "Weekly limit", "3-day limit" from a window's length.
+pub fn window_label(seconds: u64) -> String {
+    const HOUR: u64 = 3_600;
+    const DAY: u64 = 86_400;
+    match seconds {
+        s if s == 7 * DAY => "Weekly limit".into(),
+        s if s == DAY => "Daily limit".into(),
+        s if s % (7 * DAY) == 0 => format!("{}-week limit", s / (7 * DAY)),
+        s if s % DAY == 0 => format!("{}-day limit", s / DAY),
+        s if s % HOUR == 0 => format!("{}-hour limit", s / HOUR),
+        s => format!("{}-minute limit", (s / 60).max(1)),
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -256,6 +274,11 @@ fn openrouter_snapshot(payload: &Value) -> ProviderUsageSnapshot {
                 remaining: Some(remaining),
                 limit: Some(limit),
                 resets_at: None,
+                window_seconds: match data["limit_reset"].as_str() {
+                    Some("daily") => Some(86_400),
+                    Some("weekly") => Some(604_800),
+                    _ => None,
+                },
             });
         }
     }

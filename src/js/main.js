@@ -6,15 +6,26 @@ import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel, setHarness
 import { initTheme } from './core/theme.js';
 import { isNative, runtimeStatus, chooseProject, startRun, cancelRun, listenRunEvents, providerUsage, resumeJobs, cancelResumeJob, setBackgroundMode, harnessModels, ensureProject, listScheduledTasks, createScheduledTask, cancelScheduledTask, getScheduledTaskRuns, listenScheduledTasks, connectEvents, activeRuns, activityMetrics } from './services/bridge.js';
 import { loadInitialWorkspace, createWorkspacePersistence } from './services/workspace.js';
-import { basename, toast } from './components/dom.js';
+import { basename, element, toast } from './components/dom.js';
 import { renderConversations } from './components/navigation.js';
 import { createMessageRenderer } from './components/messages.js';
-import { renderAccounts, renderActivity, renderDetails } from './components/panels.js';
+import { renderAccounts, renderActivity } from './components/panels.js';
 import { renderJobs, countdown } from './components/jobs.js';
 import { initScheduledTasks } from './components/scheduled-tasks.js';
 import { initDigest } from './components/digest.js';
 import { initModels } from './components/models.js';
-import { getDigest, setDigest, runDigestNow, openWebLink, pauseScheduledTask, resumeScheduledTask } from './services/bridge.js';
+import { getDigest, setDigest, runDigestNow, openWebLink, pauseScheduledTask, resumeScheduledTask, getJobInstructions, setJobInstructions, getWakeStatus, setWakeForJobs } from './services/bridge.js';
+import { initMatrixRain } from './components/matrix-rain.js';
+import { initWorkspace } from './components/workspace.js';
+import { initPluginHost } from './plugins/host.js';
+import { initPalette } from './components/palette.js';
+import { initPlans, windowPace, countdown as limitCountdown } from './components/plans.js';
+import { setPluginThemes } from './core/theme.js';
+import { normalizeMetrics, summarizeMetrics, outcomeTotals } from './core/metrics.js';
+import { listPlugins, setPluginEnabled, createExamplePlugin, openPluginsFolder, deletePlugin } from './services/bridge.js';
+import { openChatWindow, focusChatWindow, closeChatWindow, listenChatWindows, sendToChatWindow } from './services/bridge.js';
+import { CHANGELOG, VERSION } from './core/changelog.js';
+import { applyAccessibility, readAccessibility, ACCESSIBILITY_DEFAULTS } from './core/accessibility.js';
 import { setLinkHandler } from './components/markdown.js';
 setLinkHandler(url => openWebLink(url).catch(error => toast(String(error.message || error), 'error')));
 import { recoverJobMessage } from './core/recovery.js';
@@ -22,6 +33,11 @@ import { recoverJobMessage } from './core/recovery.js';
 const $ = (selector) => document.querySelector(selector);
 const native = isNative();
 const renderMessages = createMessageRenderer($('#messages'));
+let workspace = null; // chat tabs and split panes; set up once the app has loaded
+let plans = null; // Dashboard › Your plans (live limit countdowns)
+let pluginHost = null; // plugins (pages, commands, themes, agents); set up once the app has loaded
+// Chats torn off into their own windows, and what each was last sent.
+const detachedChats = new Map();
 const runs = new Map();
 const activity = [];
 let runtime = { harnesses: [], platform: native ? 'desktop' : 'browser' };
@@ -34,6 +50,7 @@ let defaultModel = '';
 let defaultBypassPermissions = false;
 let renderedConversation;
 let sidebarSignature = '';
+let lastLook = '';
 let modelSignature = '';
 let editAction;
 let persistenceAvailable = true;
@@ -54,6 +71,7 @@ catch (error) {
 }
 const store = createStore(initial);
 const theme = initTheme(initial.preferences);
+initMatrixRain($('#matrix-rain'));
 const persistence = createWorkspacePersistence({ onError: () => toast('Changes could not be saved. Keep Noai open and try again.', 'error') });
 const scheduledTasks = initScheduledTasks({
   navigate: setView, list: listScheduledTasks, create: createScheduledTask, edit: editScheduledTask, retry: retryScheduledTask, cancel: cancelScheduledTask, pause: pauseScheduledTask, resume: resumeScheduledTask,
@@ -64,7 +82,16 @@ const scheduledTasks = initScheduledTasks({
   getRuntime: () => runtime,
 });
 
-const modelsPanel = initModels({ getRuntime: () => runtime, getModels: harnessModels, getCustomModels: () => store.getState().preferences.customModels || {}, fetchMetrics: activityMetrics, native });
+// "Chat with this model" from the Models page: a new chat preset to that agent and model.
+function chatWithModel(harness, model) {
+  newChat();
+  defaultHarness = harness;
+  defaultModel = model;
+  modelSignature = '';
+  render();
+  $('#prompt-input').focus();
+}
+const modelsPanel = initModels({ getRuntime: () => runtime, getModels: harnessModels, getCustomModels: () => store.getState().preferences.customModels || {}, fetchMetrics: activityMetrics, native, onChat: (harness, model) => chatWithModel(harness, model) });
 const digestPanel = initDigest({
   get: getDigest, set: setDigest, runNow: runDigestNow, getModels: harnessModels, native, toast,
   getRuntime: () => runtime,
@@ -104,7 +131,15 @@ function setSidebar(open) {
   document.body.classList.toggle('sidebar-open', open);
   document.querySelectorAll('[aria-controls="sidebar"]').forEach(node => node.setAttribute('aria-expanded', String(open)));
 }
+// Where Settings was opened from, so its Back button returns to that exact
+// page: the same view, the same open job or session, and the same scroll.
+let settingsReturn = null;
 function setView(next) {
+  if (next === 'settings' && view !== 'settings') {
+    // Name the page as it looks: an open job or session by its own heading.
+    const heading = view === 'chat' ? '' : document.querySelector(`#view-${view} h2`)?.textContent.trim();
+    settingsReturn = { view, hash: location.hash, title: heading || $('#main-title').textContent };
+  }
   if (next !== 'session' && location.hash.startsWith('#session=')) history.replaceState({}, '', next === 'sessions' ? '#sessions' : `#${next}`);
   viewScroll.set(view, $('.main-content').scrollTop);
   view = next;
@@ -113,11 +148,12 @@ function setView(next) {
   $('.main-content').scrollTop = viewScroll.get(next) || 0;
   if (next === 'accounts' && Date.now() - lastUsageCheck > 60000) void refreshUsage();
   if (next === 'activity') void refreshJobs();
-  if (next === 'home') void metricsPanel.refresh();
+  if (next === 'home') { void metricsPanel.refresh(); if (Date.now() - lastUsageCheck > 60000) void refreshUsage(); }
   if (next === 'sessions') void sessionsPanel.refresh();
   if (next === 'jobs') void scheduledTasks.onShow();
   if (next === 'digest') void digestPanel.refresh();
   if (next === 'models') void modelsPanel.refresh();
+  if (next === 'settings') { void loadJobInstructions(); void loadWakeStatus(); renderPluginSettings(); }
 }
 function selectConversation(id) {
   store.setState(state => ({ ...state, activeConversationId: id }));
@@ -191,14 +227,14 @@ async function loadModels(harness) {
 function render() {
   const state = store.getState();
   const conversation = active();
-  for (const name of ['home', 'chat', 'models', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
+  for (const name of ['home', 'chat', 'plugin', 'models', 'settings', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
   document.querySelectorAll('.nav-item[data-view]').forEach(button => {
     const selected = button.dataset.view === view || view === 'session' && button.dataset.view === 'sessions' || ['job', 'job-conversation'].includes(view) && button.dataset.view === 'jobs';
     button.classList.toggle('is-active', selected);
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#main-title').textContent = view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
+  $('#main-title').textContent = view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
   const project = conversation?.projectPath || state.projectPath;
   $('#project-label').textContent = state.projectPath ? basename(state.projectPath) : 'Automatic workspace';
   $('#project-label').title = state.projectPath || 'Create a UUID folder in ~/.noai when a chat starts';
@@ -209,7 +245,7 @@ function render() {
   $('#delete-chat').disabled = !!running();
   const signature = JSON.stringify([state.activeConversationId, search, state.conversations.map(({ id, title, updatedAt, harness, projectPath }) => ({ id, title, updatedAt, harness, projectPath }))]);
   if (signature !== sidebarSignature) {
-    renderConversations($('#conversation-list'), state, search, selectConversation);
+    renderConversations($('#conversation-list'), state, search, selectConversation, workspace?.makeDraggable);
     sidebarSignature = signature;
   }
   const selectedId = conversation?.id ?? null;
@@ -217,19 +253,25 @@ function render() {
     $('#prompt-input').value = conversation?.draft || (conversation ? '' : draft);
     renderedConversation = selectedId;
   }
+  workspace?.sync();
+  syncChatWindows();
+  pluginHost?.renderNav();
   $('#chat-welcome').hidden = !!conversation?.messages.length;
   renderMessages(conversation);
   renderModelOptions();
   updateComposer();
-  if (!$('#details-panel').hidden) renderDetails($('#details-content'), conversation, state, !!running());
   if (view === 'accounts') renderAccounts($('#account-list'), runtime, native, usage, state.preferences.manualPlans, openPlanLabel);
   if (view === 'activity') {
     renderActivity($('#activity-list'), state, activity);
     renderJobs($('#resume-list'), jobs, stopJob);
   }
+  $('#settings-back').hidden = !settingsReturn;
+  if (settingsReturn) $('#settings-back').textContent = `← Back to ${settingsReturn.title || 'previous page'}`;
   theme.update(state.preferences);
+  // Plugin pages follow the app's colours.
+  const look = `${document.documentElement.dataset.theme}|${state.preferences.theme}|${state.preferences.palette}`;
+  if (look !== lastLook) { lastLook = look; pluginHost?.retheme(); }
   document.querySelectorAll('input[name="theme"], input[name="palette"]').forEach(input => { input.checked = input.value === state.preferences[input.name]; });
-  $('#theme-toggle').setAttribute('aria-label', `Switch to ${document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'} theme`);
   $('#auto-resume-setting').checked = state.preferences.autoResume;
   $('#background-mode-setting').checked = state.preferences.backgroundMode;
 }
@@ -278,7 +320,7 @@ async function refreshUsage() {
   if (checkingUsage || !native) return;
   checkingUsage = true;
   $('#refresh-accounts').disabled = true;
-  try { usage = await providerUsage(); lastUsageCheck = Date.now(); }
+  try { usage = await providerUsage(); lastUsageCheck = Date.now(); plans?.render(usage); renderSidebarLimits(); }
   catch (error) { toast(`Could not refresh usage: ${String(error)}`, 'error'); }
   finally { checkingUsage = false; $('#refresh-accounts').disabled = false; render(); }
 }
@@ -333,6 +375,7 @@ function finishRun(runId, error, interrupted = false) {
     ],
   }));
   void persistence.flush().catch(() => {});
+  pluginHost?.emit('chat.finished', { chatId: run.conversationId, error: error || null, stopped: !!interrupted }, 'chats:read');
 }
 
 function onRunEvent(event) {
@@ -360,7 +403,11 @@ function onRunEvent(event) {
   } else if (event.type === 'session' && event.resumeId) {
     updateConversation(run.conversationId, item => ({ ...item, resumeId: event.resumeId }));
   } else if (event.type === 'text' && event.text) {
-    updateConversation(run.conversationId, item => ({ ...item, messages: item.messages.map(message => message.id === run.messageId ? { ...message, content: message.content + (message.content ? '\n\n' : '') + event.text } : message) }));
+    // Plugin agents print plain text line by line; built-in agents send whole paragraphs.
+    const joiner = run.harness?.startsWith('plugin-') ? '\n' : '\n\n';
+    updateConversation(run.conversationId, item => ({ ...item, messages: item.messages.map(message => message.id === run.messageId ? { ...message, content: message.content + (message.content ? joiner : '') + event.text } : message) }));
+  } else if (event.type === 'notice' && event.text) {
+    toast(event.text, 'error');
   } else if (event.type === 'activity') {
     activity.unshift({ id: crypto.randomUUID(), text: event.text || 'Agent working', title: getHarness(run.harness)?.label, at: new Date().toISOString() });
     if (activity.length > 100) activity.length = 100;
@@ -400,20 +447,26 @@ $('#composer-form').addEventListener('submit', async (event) => {
     preparingRun = false;
     updateComposer();
   }
+  $('#prompt-input').value = '';
+  draft = '';
+  await runPrompt(conversation, prompt);
+});
+
+/** Starts the agent on `prompt` in an existing conversation (any pane or window). */
+async function runPrompt(conversation, prompt) {
   const runId = crypto.randomUUID();
   const message = createMessage('assistant', '', { status: 'streaming', runId });
   runs.set(runId, { runId, conversationId: conversation.id, messageId: message.id, harness: conversation.harness });
-  $('#prompt-input').value = '';
-  draft = '';
   updateConversation(conversation.id, item => ({ ...item, draft: '', updatedAt: new Date().toISOString(), messages: [...item.messages, createMessage('user', prompt), message] }));
   try {
     await persistence.flush();
     await startRun({ runId, conversationId: conversation.id, harness: conversation.harness, model: conversation.model || null, projectPath: conversation.projectPath, prompt, resumeId: conversation.resumeId, dangerouslyBypassPermissions: conversation.dangerouslyBypassPermissions, autoResume: store.getState().preferences.autoResume });
   } catch (error) { finishRun(runId, String(error)); }
-});
+}
 
-$('#stop-button').addEventListener('click', async () => {
-  const run = running();
+/** Stops whatever is running in a conversation. */
+async function stopConversation(conversationId) {
+  const run = running(conversationId);
   if (!run) return;
   run.stopping = true;
   try {
@@ -421,7 +474,9 @@ $('#stop-button').addEventListener('click', async () => {
     else await cancelRun(run.runId);
   }
   catch (error) { run.stopping = false; toast(`Could not stop this run: ${String(error)}`, 'error'); }
-});
+}
+
+$('#stop-button').addEventListener('click', () => void stopConversation(active()?.id));
 $('#prompt-input').addEventListener('input', event => setDraft(event.target.value));
 $('#prompt-input').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -491,9 +546,149 @@ $('#custom-model-form').addEventListener('submit', event => {
   $('#model-dialog').close();
 });
 $('#model-cancel').addEventListener('click', () => $('#model-dialog').close());
-$('#open-settings').addEventListener('click', () => { setSidebar(false); $('#settings-dialog').showModal(); });
-$('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
-$('#settings-dialog').addEventListener('change', event => {
+// Settings is a page with its own list of sections, like System Settings.
+function showSettingsSection(name) {
+  document.querySelectorAll('.settings-nav-item').forEach(item => {
+    const selected = item.dataset.settingsSection === name;
+    item.classList.toggle('is-active', selected);
+    if (selected) item.setAttribute('aria-current', 'true'); else item.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.settings-section').forEach(section => { section.hidden = section.dataset.section !== name; });
+  if (name === 'jobs') void loadJobInstructions();
+  if (name === 'plugins') renderPluginSettings();
+  if (name === 'appearance') showThemePage(true);
+}
+document.querySelectorAll('.settings-nav-item').forEach(item => item.addEventListener('click', () => showSettingsSection(item.dataset.settingsSection)));
+function leaveSettings() {
+  const back = settingsReturn || { view: 'chat', hash: '' };
+  settingsReturn = null;
+  // Put back the page's address (e.g. #session=…) without reloading it.
+  if (back.hash !== location.hash) history.replaceState({}, '', back.hash || location.pathname);
+  setView(back.view);
+}
+$('#settings-back').addEventListener('click', leaveSettings);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && view === 'settings' && !event.target.closest?.('input, textarea, select')) leaveSettings();
+});
+// ---- Accessibility -------------------------------------------------------------
+function showAccessibility(settings = readAccessibility()) {
+  $('#text-size').value = String(settings.textSize);
+  $('#text-size-value').textContent = `${settings.textSize}%`;
+  document.querySelectorAll('input[name="vision"]').forEach(input => { input.checked = input.value === settings.vision; });
+  $('#contrast-setting').checked = settings.contrast;
+  $('#motion-setting').checked = settings.motion;
+}
+showAccessibility(applyAccessibility());
+$('#text-size').addEventListener('input', event => {
+  $('#text-size-value').textContent = `${event.target.value}%`;
+  applyAccessibility({ textSize: Number(event.target.value) });
+});
+$('#text-size-reset').addEventListener('click', () => showAccessibility(applyAccessibility({ textSize: ACCESSIBILITY_DEFAULTS.textSize })));
+$('#vision-options').addEventListener('change', event => showAccessibility(applyAccessibility({ vision: event.target.value })));
+$('#contrast-setting').addEventListener('change', event => applyAccessibility({ contrast: event.target.checked }));
+$('#motion-setting').addEventListener('change', event => applyAccessibility({ motion: event.target.checked }));
+// ⌘+ / ⌘− / ⌘0 change the text size too.
+document.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+  const step = event.key === '=' || event.key === '+' ? 5 : event.key === '-' ? -5 : event.key === '0' ? 0 : null;
+  if (step === null) return;
+  event.preventDefault();
+  const size = step === 0 ? 100 : readAccessibility().textSize + step;
+  showAccessibility(applyAccessibility({ textSize: Math.min(150, Math.max(85, size)) }));
+});
+
+// The sidebar folds down to a strip of icons; the choice is remembered here.
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  const button = $('#sidebar-collapse');
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', collapsed ? 'Show sidebar' : 'Hide sidebar');
+  button.title = `${collapsed ? 'Show' : 'Hide'} sidebar (⌘\\)`;
+  try { localStorage.setItem('noai.sidebarCollapsed', collapsed ? '1' : ''); } catch { /* not kept */ }
+}
+try { setSidebarCollapsed(localStorage.getItem('noai.sidebarCollapsed') === '1'); } catch { setSidebarCollapsed(false); }
+$('#sidebar-collapse').addEventListener('click', () => setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')));
+// Icon-only items still say what they are on hover.
+document.querySelectorAll('#sidebar .nav-item').forEach(item => { if (!item.title) item.title = item.textContent.trim(); });
+
+// Version under the logo opens the changelog.
+$('#version-button').textContent = `v${VERSION}`;
+$('#version-button').addEventListener('click', () => {
+  const body = $('#changelog-body');
+  body.replaceChildren(...CHANGELOG.map(entry => {
+    const section = element('section', 'changelog-entry');
+    const head = element('div', 'changelog-head');
+    head.append(element('strong', '', `Version ${entry.version}`), element('span', 'changelog-date', new Date(`${entry.date}T12:00:00`).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })));
+    const list = element('ul');
+    for (const note of entry.notes) list.append(element('li', '', note));
+    section.append(head, element('h3', '', entry.title), list);
+    return section;
+  }));
+  $('#changelog-dialog').showModal();
+});
+$('#changelog-close').addEventListener('click', () => $('#changelog-dialog').close());
+
+document.addEventListener('keydown', event => {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  if (event.key === '\\') { event.preventDefault(); setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')); }
+  // ⌘D splits the current chat to the right, ⌘⇧D below it.
+  if (event.key.toLowerCase() === 'd' && view === 'chat' && workspace) { event.preventDefault(); workspace.splitFocused(event.shiftKey ? 'bottom' : 'right'); }
+});
+// ⌘, (Ctrl+, elsewhere) opens Settings, as in other Mac apps.
+document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === ',') { event.preventDefault(); setView('settings'); } });
+
+// Waking the computer for jobs. Turning it on may show the system's admin
+// prompt once (macOS, Linux); the background service applies it within a minute.
+function showWakeStatus(status) {
+  const toggle = $('#wake-setting');
+  toggle.checked = !!status?.enabled;
+  toggle.disabled = !status?.supported;
+  $('#wake-detail').textContent = status?.detail || '';
+}
+async function loadWakeStatus() {
+  try { showWakeStatus(await getWakeStatus()); }
+  catch (error) { $('#wake-status').textContent = `Could not check wake settings: ${String(error)}`; }
+}
+$('#wake-setting').addEventListener('change', async event => {
+  const toggle = event.target, wanted = toggle.checked, status = $('#wake-status');
+  toggle.disabled = true;
+  status.textContent = wanted ? 'Waiting for your approval…' : 'Turning off…';
+  try {
+    showWakeStatus(await setWakeForJobs(wanted));
+    status.textContent = wanted ? 'On. The computer will wake a minute before the next job.' : 'Off. Jobs run when the computer is next awake.';
+  } catch (error) {
+    toggle.checked = !wanted; toggle.disabled = false;
+    status.textContent = String(error).replace(/^Error: /, '');
+  }
+});
+
+// Standing instructions for every job run, kept by the background service.
+let instructionsLoaded = false;
+async function loadJobInstructions() {
+  const form = $('#job-instructions-form'), status = $('#job-instructions-status');
+  if (!native) { form.querySelectorAll('textarea, button').forEach(node => { node.disabled = true; }); status.textContent = 'Open the desktop app to set job instructions.'; return; }
+  if (instructionsLoaded) return;
+  try {
+    const saved = await getJobInstructions();
+    $('#job-instructions-recurring').value = saved?.recurring || '';
+    $('#job-instructions-one-time').value = saved?.oneTime || '';
+    instructionsLoaded = true;
+    status.textContent = '';
+  } catch (error) { status.textContent = `Could not load instructions: ${String(error)}`; }
+}
+$('#job-instructions-form').addEventListener('input', () => { $('#job-instructions-status').textContent = 'Not saved yet'; });
+$('#job-instructions-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = $('#job-instructions-save'), status = $('#job-instructions-status');
+  button.disabled = true; status.textContent = 'Saving…';
+  try {
+    const saved = await setJobInstructions({ recurring: $('#job-instructions-recurring').value, oneTime: $('#job-instructions-one-time').value });
+    $('#job-instructions-recurring').value = saved.recurring; $('#job-instructions-one-time').value = saved.oneTime;
+    status.textContent = 'Saved. Applies from the next run.';
+  } catch (error) { status.textContent = String(error); }
+  finally { button.disabled = false; }
+});
+$('#view-settings').addEventListener('change', event => {
   if (['theme', 'palette'].includes(event.target.name)) savePreferences({ [event.target.name]: event.target.value });
 });
 $('#auto-resume-setting').addEventListener('change', event => savePreferences({ autoResume: event.target.checked }));
@@ -502,15 +697,6 @@ $('#background-mode-setting').addEventListener('change', async event => {
   try { await setBackgroundMode(enabled); savePreferences({ backgroundMode: enabled }); }
   catch (error) { render(); toast(`Could not change background behavior: ${String(error)}`, 'error'); }
 });
-$('#theme-toggle').addEventListener('click', () => savePreferences({ theme: document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark' }));
-function showDetails(show) {
-  $('#details-panel').hidden = !show;
-  $('#details-toggle').setAttribute('aria-expanded', String(show));
-  $('#details-toggle').setAttribute('aria-label', show ? 'Hide details' : 'Show details');
-  render();
-}
-$('#details-toggle').addEventListener('click', () => showDetails($('#details-panel').hidden));
-$('[data-action="close-details"]').addEventListener('click', () => showDetails(false));
 $('[data-action="toggle-sidebar"]').addEventListener('click', () => setSidebar(!document.body.classList.contains('sidebar-open')));
 $('#sidebar-toggle').addEventListener('click', () => setSidebar(false));
 $('#refresh-accounts').addEventListener('click', async () => { await refreshRuntime(); await refreshUsage(); void loadModels(active()?.harness || defaultHarness); });
@@ -562,6 +748,221 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) void persistence.flush().catch(() => {}); });
 
+// Sidebar: a compact view of each plan's limits, filling the space tall windows leave.
+function renderSidebarLimits() {
+  const panel = $('#sidebar-limits');
+  const now = Date.now() / 1000;
+  const items = usage.flatMap(snapshot => (snapshot.windows || []).filter(window => window.usedPercent != null).slice(0, 2).map(window => ({ snapshot, window })));
+  panel.hidden = !items.length;
+  if (!items.length) return;
+  const rows = items.map(({ snapshot, window }) => {
+    const pace = windowPace(window, now);
+    const row = element('span', `sidebar-limit${pace.used >= 90 ? ' is-bad' : pace.used >= 75 ? ' is-warn' : ''}`);
+    const head = element('span', 'sidebar-limit-head');
+    head.append(element('span', '', `${snapshot.label.replace(/ Code$/, '')} · ${window.label.replace(/ limit$/i, '')}`), element('strong', '', `${Math.round(pace.used)}%`));
+    const bar = element('span', 'sidebar-limit-bar'), fill = element('span');
+    fill.style.setProperty('width', `${pace.used}%`);
+    bar.append(fill);
+    row.append(head, bar);
+    if (pace.left !== null) row.append(element('small', '', pace.left > 0 ? `Resets in ${limitCountdown(pace.left).replace(/ \d+s$/, '')}` : 'Resetting…'));
+    return row;
+  });
+  panel.replaceChildren(element('span', 'sidebar-limits-title', 'Usage limits'), ...rows);
+}
+$('#sidebar-limits').addEventListener('click', () => setView('home'));
+setInterval(() => { if (!document.hidden) renderSidebarLimits(); }, 30000);
+
+plans = initPlans($('#plans-overview'), { onReset: () => void refreshUsage(), openAccounts: () => setView('accounts') });
+plans.render(usage);
+
+// ---- Plugins ------------------------------------------------------------------------
+function drawPluginThemes(themes) {
+  const clean = setPluginThemes(themes);
+  document.querySelectorAll('#theme-options .theme-choice.is-plugin').forEach(node => node.remove());
+  for (const [key, plugin] of Object.entries(clean)) {
+    const label = element('label', 'theme-choice is-plugin');
+    const input = element('input');
+    input.type = 'radio'; input.name = 'theme'; input.value = key;
+    input.checked = store.getState().preferences.theme === key;
+    const preview = element('span', 'theme-preview');
+    preview.setAttribute('aria-hidden', 'true');
+    const colors = plugin.colors;
+    preview.style.setProperty('background', plugin.background ? `url("${plugin.background}") center / cover no-repeat, ${colors['--canvas'] || '#222'}` : colors['--canvas'] || '#222');
+    const bars = [element('i'), element('i'), element('i')];
+    bars[0].style.setProperty('background', colors['--sidebar'] || colors['--surface'] || '#333');
+    bars[1].style.setProperty('background', colors['--accent'] || '#888');
+    bars[2].style.setProperty('background', colors['--surface'] || '#444');
+    preview.append(...bars);
+    label.append(input, preview, element('span', 'theme-choice-name', plugin.name));
+    $('#theme-options').append(label);
+  }
+  showThemePage();
+  // A plugin theme that went away falls back to the system look.
+  const chosen = store.getState().preferences.theme;
+  if (/^plugin:/.test(chosen) && !clean[chosen]) savePreferences({ theme: 'system' });
+  else theme.update(store.getState().preferences);
+}
+// Theme picker: search by name, 12 at a time.
+const THEMES_PER_PAGE = 12;
+let themePage = 0;
+function showThemePage(goToSelected = false) {
+  const choices = [...document.querySelectorAll('#theme-options .theme-choice')];
+  const query = $('#theme-search').value.trim().toLowerCase();
+  const matches = choices.filter(choice => !query || choice.textContent.toLowerCase().includes(query));
+  const pages = Math.max(1, Math.ceil(matches.length / THEMES_PER_PAGE));
+  if (goToSelected) {
+    const selected = matches.findIndex(choice => choice.querySelector('input')?.checked);
+    if (selected >= 0) themePage = Math.floor(selected / THEMES_PER_PAGE);
+  }
+  themePage = Math.min(Math.max(0, themePage), pages - 1);
+  const shown = new Set(matches.slice(themePage * THEMES_PER_PAGE, (themePage + 1) * THEMES_PER_PAGE));
+  for (const choice of choices) choice.hidden = !shown.has(choice);
+  const many = choices.length > THEMES_PER_PAGE;
+  $('#theme-tools').hidden = !many;
+  $('#theme-pages').hidden = pages < 2;
+  $('#theme-empty').hidden = matches.length > 0;
+  $('#theme-page-label').textContent = `Page ${themePage + 1} of ${pages}`;
+  $('#theme-prev').disabled = themePage === 0;
+  $('#theme-next').disabled = themePage >= pages - 1;
+  $('#theme-count').textContent = query ? `${matches.length} of ${choices.length}` : `${choices.length} themes`;
+}
+$('#theme-search').addEventListener('input', () => { themePage = 0; showThemePage(); });
+$('#theme-prev').addEventListener('click', () => { themePage -= 1; showThemePage(); });
+$('#theme-next').addEventListener('click', () => { themePage += 1; showThemePage(); });
+
+async function pluginSendChat({ prompt, chatId, harness, model } = {}) {
+  const text = typeof prompt === 'string' ? prompt.trim().slice(0, 100000) : '';
+  if (!text) throw new Error('A prompt is required');
+  let conversation = chatId ? store.getState().conversations.find(item => item.id === chatId) : null;
+  if (chatId && !conversation) throw new Error('No such chat');
+  if (conversation && running(conversation.id)) throw new Error('That chat is already working');
+  if (!conversation) {
+    const agent = harness && getHarness(harness) ? harness : defaultHarness;
+    const projectPath = await ensureProject(store.getState().projectPath || null);
+    conversation = createConversation({ title: text.slice(0, 54), harness: agent, model: typeof model === 'string' ? model.slice(0, 200) : '', projectPath, dangerouslyBypassPermissions: false });
+    store.setState(state => ({ ...state, conversations: [...state.conversations, conversation] }));
+  }
+  await runPrompt(conversation, text);
+  return { chatId: conversation.id };
+}
+pluginHost = initPluginHost({
+  native, platform: () => runtime.platform,
+  navEl: $('.primary-nav'), viewEl: $('#view-plugin'), workersEl: $('#plugin-workers'),
+  setView, getView: () => view, toast,
+  onThemes: drawPluginThemes,
+  onManage: () => { setView('settings'); showSettingsSection('plugins'); },
+  api: {
+    list: listPlugins,
+    appInfo: () => ({ version: VERSION, theme: document.documentElement.dataset.theme }),
+    listChats: () => store.getState().conversations.map(item => ({ id: item.id, title: item.title, harness: item.harness, model: item.model || '', projectPath: item.projectPath || '', updatedAt: item.updatedAt, messageCount: item.messages.length, running: !!running(item.id) })),
+    getChat: id => {
+      const item = store.getState().conversations.find(entry => entry.id === id);
+      if (!item) throw new Error('No such chat');
+      return { id: item.id, title: item.title, harness: item.harness, model: item.model || '', projectPath: item.projectPath || '', messages: item.messages.map(message => ({ role: message.role, content: message.content, createdAt: message.createdAt, status: message.status || '' })) };
+    },
+    openChat: id => { if (!store.getState().conversations.some(item => item.id === id)) throw new Error('No such chat'); selectConversation(id); return true; },
+    sendChat: pluginSendChat,
+    listJobs: async () => (await listScheduledTasks()).map(task => ({ id: task.id, title: task.title, status: task.status, harness: task.harness, model: task.model || '', intervalSeconds: task.intervalSeconds || null, nextRunAt: task.nextRunAt || null, lastResult: task.lastResult || null })),
+    jobRuns: async id => (await getScheduledTaskRuns(id)).map(run => ({ runId: run.runId, status: run.status, startedAt: run.startedAt, finishedAt: run.finishedAt || null, result: run.result || null })),
+    metricsSummary: async range => {
+      const report = summarizeMetrics(normalizeMetrics((await activityMetrics()).records || []), { range });
+      return { range, tokens: report.tokens, input: report.input, output: report.output, cacheRate: report.cacheRate, cost: report.cost, sessions: report.runs, toolEvents: report.toolCount, calls: outcomeTotals(report.outcomes) };
+    },
+  },
+});
+function renderPluginSettings() {
+  pluginHost?.renderSettings($('#plugin-settings'), {
+    // The agent list catches up in the background; the switch doesn't wait for it.
+    setEnabled: async (id, enabled) => { await setPluginEnabled(id, enabled); void refreshRuntime(); },
+    createExample: createExamplePlugin,
+    openFolder: openPluginsFolder,
+    remove: async id => { await deletePlugin(id); void refreshRuntime(); },
+  });
+}
+void pluginHost.load().then(renderPluginSettings);
+
+// ⌘K: every action in one searchable list, plugin commands included.
+const palette = initPalette({
+  dialog: $('#palette-dialog'), input: $('#palette-input'), list: $('#palette-list'),
+  getCommands: () => [
+    { key: 'new-chat', title: 'New chat', hint: '⌘N', run: newChat },
+    ...[['home', 'Dashboard'], ['chat', 'Chat'], ['jobs', 'Jobs'], ['digest', 'Digest'], ['sessions', 'Sessions'], ['activity', 'Activity'], ['accounts', 'Accounts'], ['models', 'Models'], ['settings', 'Settings']]
+      .map(([id, title]) => ({ key: `go-${id}`, title: `Go to ${title}`, run: () => setView(id) })),
+    { key: 'split-right', title: 'Split chat right', hint: '⌘D', run: () => { setView('chat'); workspace?.splitFocused('right'); } },
+    { key: 'split-down', title: 'Split chat down', hint: '⇧⌘D', run: () => { setView('chat'); workspace?.splitFocused('bottom'); } },
+    ...(active() ? [{ key: 'tear-off', title: 'Open this chat in a new window', run: () => tearOff(active().id) }] : []),
+    { key: 'sidebar', title: 'Show or hide the sidebar', hint: '⌘\\', run: () => setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')) },
+    { key: 'changelog', title: 'What’s new', run: () => $('#version-button').click() },
+    ...(pluginHost?.commands() || []).filter(command => command.context !== 'chat' || active()).map(command => ({
+      key: `plugin-${command.key}`, title: command.title, hint: command.plugin.name,
+      run: () => pluginHost.run(command, command.context === 'chat' ? { chatId: active()?.id } : {}),
+    })),
+  ],
+});
+document.addEventListener('keydown', event => {
+  if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'k') { event.preventDefault(); palette.open(); }
+});
+
+// ---- Chats in their own windows --------------------------------------------
+function chatWindowPayload(conversation) {
+  const run = running(conversation.id);
+  return {
+    id: conversation.id, title: conversation.title, harness: conversation.harness,
+    agent: getHarness(conversation.harness)?.label || conversation.harness, model: conversation.model || '',
+    project: conversation.projectPath ? basename(conversation.projectPath) : '',
+    messages: conversation.messages, running: !!run,
+    status: run?.waiting ? `Waiting for quota · ${countdown(run.retryAt)}` : run ? 'Working in your project · You can stop at any time.' : 'Enter to send · Shift + Enter for a new line',
+  };
+}
+function syncChatWindows(force = false) {
+  for (const [id, last] of detachedChats) {
+    const conversation = store.getState().conversations.find(item => item.id === id);
+    const payload = conversation ? chatWindowPayload(conversation) : null;
+    const signature = JSON.stringify(payload);
+    if (!force && signature === last) continue;
+    detachedChats.set(id, signature);
+    void sendToChatWindow(id, payload).catch(() => {});
+  }
+}
+async function tearOff(id, x = null, y = null) {
+  const conversation = store.getState().conversations.find(item => item.id === id);
+  if (!conversation || !native) return;
+  try {
+    await openChatWindow(id, conversation.title, x, y);
+    detachedChats.set(id, '');
+    render();
+  } catch (error) { toast(`Could not open a window for this chat: ${String(error)}`, 'error'); }
+}
+function dock(id) {
+  if (!detachedChats.delete(id)) return;
+  void closeChatWindow(id).catch(() => {});
+}
+if (native) {
+  await listenChatWindows(async ({ id, action, prompt }) => {
+    if (!detachedChats.has(id)) return;
+    const conversation = store.getState().conversations.find(item => item.id === id);
+    if (action === 'ready') { detachedChats.set(id, ''); syncChatWindows(); }
+    else if (action === 'send' && conversation && typeof prompt === 'string' && prompt.trim() && !running(id)) await runPrompt(conversation, prompt.trim().slice(0, 100000));
+    else if (action === 'stop') await stopConversation(id);
+    else if (action === 'dock') { dock(id); workspace?.splitFocused('right', id); }
+  }, id => { if (detachedChats.delete(id)) render(); });
+}
+
+workspace = initWorkspace({
+  isDetached: id => detachedChats.has(id),
+  onTearOff: (id, x, y) => void tearOff(id, x, y),
+  onShowDetached: id => void focusChatWindow(id).catch(() => {}),
+  onDock: dock,
+  layoutEl: $('#chat-layout'), tabsEl: $('#chat-tabs'),
+  dock: { home: $('#chat-dock-home'), messages: $('#messages'), welcome: $('#chat-welcome'), composer: $('.composer-dock') },
+  getState: () => store.getState(),
+  titleOf: conversation => conversation.title,
+  isRunning: id => !!running(id),
+  onFocus: id => { store.setState(state => ({ ...state, activeConversationId: id })); if (view !== 'chat') setView('chat'); },
+  onNewChat: newChat,
+});
+sidebarSignature = '';
+
 render();
 try { await listenRunEvents(onRunEvent); }
 catch (error) { persistenceAvailable = false; toast(`Cannot receive agent responses: ${String(error)}`, 'error'); }
@@ -569,7 +970,18 @@ await refreshRuntime();
 try { await setBackgroundMode(store.getState().preferences.backgroundMode); }
 catch (error) { toast(`Background mode is unavailable: ${String(error)}`, 'error'); }
 await refreshJobs();
-try { await listenScheduledTasks(() => { if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
+// Plugins hear when a job's run finishes ("job.finished").
+const jobRunsSeen = new Map();
+function noteJobForPlugins(task) {
+  if (!task?.id || !task.lastRunId || !task.lastResult) return;
+  const seen = jobRunsSeen.get(task.id);
+  jobRunsSeen.set(task.id, task.lastRunId);
+  if (seen === undefined || seen === task.lastRunId) return;
+  pluginHost?.emit('job.finished', { jobId: task.id, title: task.title, status: task.status === 'scheduled' ? 'completed' : task.status, result: task.lastResult }, 'jobs:read');
+}
+try { (await listScheduledTasks()).forEach(task => { if (task.lastRunId) jobRunsSeen.set(task.id, task.lastRunId); }); } catch { /* jobs unavailable */ }
+try { await listenScheduledTasks(task => {
+  noteJobForPlugins(task); if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
 catch (error) { toast(`Job updates are unavailable: ${String(error)}`, 'error'); }
 try {
   for (const item of await activeRuns()) {
@@ -593,7 +1005,7 @@ setInterval(() => {
   if (running()?.waiting) updateComposer();
   if (view === 'activity') renderJobs($('#resume-list'), jobs, stopJob);
 }, 1000);
-setInterval(() => { if (view === 'accounts' && !document.hidden) void refreshUsage(); }, 120000);
+setInterval(() => { if (['accounts', 'home'].includes(view) && !document.hidden) void refreshUsage(); }, 120000);
 
 // Native close waits for the final workspace write instead of losing debounced edits.
 if (native && window.__TAURI__.window?.getCurrentWindow) {

@@ -1,4 +1,40 @@
 //! Desktop client for the single-owner Noai daemon.
+
+/// Which binary this process started from: its path and modification time.
+/// The daemon records it at startup, so after a rebuild the app can tell the
+/// running daemon is older than itself and replace it.
+pub fn build_stamp() -> &'static str {
+    static STAMP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    STAMP.get_or_init(|| {
+        std::env::current_exe()
+            .ok()
+            .map(|path| {
+                let modified = std::fs::metadata(&path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |age| age.as_secs());
+                format!("{}|{modified}", path.display())
+            })
+            .unwrap_or_default()
+    })
+}
+
+/// True when a daemon reporting `stamp` should make way for this binary: it
+/// runs an older copy of the same file, or predates build stamps. A daemon
+/// from a different binary (another install) is left alone. One run by the
+/// user service is started again by it, from its configured binary.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn daemon_is_stale(stamp: Option<&str>, ours: &str) -> bool {
+    match stamp {
+        None => true,
+        Some(theirs) => {
+            theirs != ours
+                && theirs.rsplit_once('|').map(|(path, _)| path)
+                    == ours.rsplit_once('|').map(|(path, _)| path)
+        }
+    }
+}
 #[cfg(unix)]
 mod unix {
     use serde::de::DeserializeOwned;
@@ -36,8 +72,33 @@ mod unix {
         Ok(stream)
     }
 
+    /// Asks a daemon left over from an older build of this same binary to
+    /// exit, so the code below starts the new one. A daemon with runs in
+    /// progress refuses and keeps going; the app then uses it as before.
+    fn replace_stale_daemon(app: &AppHandle, path: &Path) {
+        let Ok(info) = request::<Value>(app, serde_json::json!({"command":"ping"})) else {
+            return;
+        };
+        let stamp = info.get("build").and_then(Value::as_str);
+        if !super::daemon_is_stale(stamp, super::build_stamp()) {
+            return;
+        }
+        if request::<Value>(app, serde_json::json!({"command":"shutdown"})).is_err() {
+            return;
+        }
+        for _ in 0..50 {
+            if connect(path).is_err() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     pub fn ensure_started(app: &AppHandle) -> Result<(), String> {
         let path = socket_path(app)?;
+        if connect(&path).is_ok() {
+            replace_stale_daemon(app, &path);
+        }
         if connect(&path).is_ok() {
             return Ok(());
         }
@@ -157,3 +218,20 @@ mod unix {
 }
 #[cfg(unix)]
 pub use unix::{ensure_started, replay_events, request, start_event_relay};
+
+#[cfg(test)]
+mod tests {
+    use super::daemon_is_stale;
+
+    #[test]
+    fn only_an_older_copy_of_the_same_binary_is_replaced() {
+        let ours = "/app/noai|200";
+        assert!(daemon_is_stale(Some("/app/noai|100"), ours));
+        assert!(!daemon_is_stale(Some(ours), ours));
+        assert!(!daemon_is_stale(
+            Some("/Applications/Noai.app/noai|100"),
+            ours
+        ));
+        assert!(daemon_is_stale(None, ours));
+    }
+}

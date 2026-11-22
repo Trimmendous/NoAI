@@ -1,0 +1,30 @@
+{
+  "id": "hello-noai",
+  "name": "Hello Noai",
+  "version": "1.0.0",
+  "description": "An example plugin with a page, two commands, a theme and a test agent. Copy it to start your own.",
+  "author": "Noai",
+  "permissions": ["chats:read", "jobs:read", "notify"],
+  "pages": [
+    { "id": "overview", "title": "Hello", "icon": "H", "entry": "page.html" }
+  ],
+  "main": "main.js",
+  "commands": [
+    { "id": "count-messages", "title": "Count messages in this chat", "context": "chat" },
+    { "id": "say-hello", "title": "Say hello" }
+  ],
+  "themes": [
+    {
+      "id": "solarized", "name": "Solarized", "base": "dark",
+      "colors": {
+        "--canvas": "#002b36", "--surface": "#073642", "--surface-subtle": "#0b3d4a", "--surface-hover": "#114957",
+        "--sidebar": "rgba(0, 34, 43, 0.92)", "--topbar": "rgba(0, 43, 54, 0.85)",
+        "--ink": "#eee8d5", "--ink-soft": "#c5bfaa", "--ink-muted": "#93a1a1", "--line": "#0e4a5a", "--line-strong": "#1c6475",
+        "--accent": "#b58900", "--accent-hover": "#cb9a10", "--accent-soft": "#3b3a1c", "--accent-ink": "#002b36"
+      }
+    }
+  ],
+  "agents": [
+    { "id": "echo", "label": "Echo (test agent)", "command": "cat", "output": "text" }
+  ]
+}

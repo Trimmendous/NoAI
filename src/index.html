@@ -12,13 +12,17 @@
     <script src="./js/components/job-guide.js" type="module"></script>
   </head>
   <body>
+    <canvas id="matrix-rain" class="matrix-rain" aria-hidden="true" hidden></canvas>
     <div id="app" class="app-shell">
       <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
         <div class="sidebar-top">
           <div class="brand-row">
+            <div class="brand-stack">
             <a class="brand" href="#home" aria-label="Noai home" data-view="home">
               <span class="wordmark" aria-hidden="true"><span class="wordmark-prompt">&gt;</span>NoA<svg class="wordmark-glyph" viewBox="-20 0 94 100" aria-hidden="true"><g transform="skewX(-11)"><rect class="wordmark-stem" x="6" y="0" width="17" height="100" /><g class="wordmark-cursor"><rect x="23" y="42" width="30" height="15" /><rect x="53" y="0" width="17" height="100" /></g></g></svg></span>
             </a>
+              <button id="version-button" class="version-button" type="button" aria-haspopup="dialog" title="What’s new">v0.0</button>
+            </div>
             <button id="sidebar-toggle" class="icon-button sidebar-close" type="button" aria-label="Close sidebar" aria-controls="sidebar" aria-expanded="true">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
             </button>
@@ -51,8 +55,9 @@
           <div id="conversation-list" class="conversation-list" aria-label="Conversations"><p class="conversation-empty">Your conversations will appear here.</p></div>
         </div>
 
+        <button id="sidebar-limits" class="sidebar-limits" type="button" title="Usage limits · open the Dashboard" hidden></button>
         <div class="sidebar-bottom">
-          <button id="open-settings" class="nav-item settings-trigger" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg><span>Settings</span></button>
+          <button id="open-settings" class="nav-item settings-trigger" type="button" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg><span>Settings</span></button>
           <div class="runtime-row"><span class="status-dot" aria-hidden="true"></span><span id="runtime-label">Connecting to local runtime…</span></div>
         </div>
       </aside>
@@ -60,20 +65,23 @@
       <div class="main-frame">
         <header class="topbar">
           <div class="topbar-leading">
+            <button id="sidebar-collapse" class="icon-button sidebar-collapse" type="button" aria-label="Hide sidebar" title="Hide sidebar (⌘\)" aria-controls="sidebar" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg></button>
             <button class="icon-button mobile-menu" type="button" aria-label="Open sidebar" aria-controls="sidebar" aria-expanded="false" data-action="toggle-sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
             <span class="breadcrumb-project" id="header-project">No project</span><span class="breadcrumb-divider" aria-hidden="true">/</span><h1 id="main-title">New chat</h1>
           </div>
           <div class="topbar-actions">
             <button id="rename-chat" class="icon-button chat-action" type="button" aria-label="Rename conversation" title="Rename conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 11-11 4 4L8 20H4v-4ZM13 7l4 4" /></svg></button>
             <button id="delete-chat" class="icon-button chat-action danger-action" type="button" aria-label="Delete conversation" title="Delete conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg></button>
-            <button id="theme-toggle" class="icon-button" type="button" aria-label="Toggle color theme" title="Toggle color theme"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5Z" /></svg></button>
-            <button id="details-toggle" class="icon-button" type="button" aria-label="Show details" aria-controls="details-panel" aria-expanded="false" title="Show details"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></svg></button>
+            <button id="header-settings" class="icon-button" type="button" aria-label="Settings" title="Settings" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg></button>
           </div>
         </header>
 
         <div class="content-frame">
           <main class="main-content">
             <section id="view-chat" class="chat-view" aria-label="Chat">
+              <div id="chat-tabs" class="chat-tabs" role="tablist" aria-label="Open chats" hidden></div>
+              <div id="chat-layout" class="chat-layout"></div>
+              <div id="chat-dock-home" class="chat-dock-home" hidden>
               <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
               <div id="chat-welcome" class="chat-welcome">
                 <div class="welcome-mark" aria-hidden="true"><svg class="wordmark-glyph" viewBox="-20 0 94 100" aria-hidden="true"><g transform="skewX(-11)"><rect class="wordmark-stem" x="6" y="0" width="17" height="100" /><g class="wordmark-cursor"><rect x="23" y="42" width="30" height="15" /><rect x="53" y="0" width="17" height="100" /></g></g></svg></div>
@@ -103,7 +111,52 @@
                 </form>
                 <p id="composer-status" class="composer-status" role="status">Enter to send · A fresh folder is created when no project is chosen.</p>
               </div>
+              </div>
             </section>
+
+            <section id="view-settings" class="page-view settings-view" aria-labelledby="settings-title" hidden>
+              <button id="settings-back" class="secondary-button settings-back" type="button" hidden>← Back</button>
+              <div class="page-heading"><div><h2 id="settings-title">Settings</h2><p>How Noai looks and how your jobs run.</p></div></div>
+              <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections"><button type="button" class="settings-nav-item is-active" data-settings-section="appearance" aria-current="true"><span class="ui-tile settings-tile-appearance" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 1 0-18c4.97 0 9 3.58 9 8a4 4 0 0 1-4 4h-2.2a1.8 1.8 0 0 0-1.3 3.05A1.8 1.8 0 0 1 12 21z" /><circle cx="7.5" cy="11.5" r="1" /><circle cx="10.5" cy="7.5" r="1" /><circle cx="15.5" cy="7.5" r="1" /></svg></span><span class="settings-nav-copy"><strong>Appearance</strong><small>Theme and accent colour</small></span></button><button type="button" class="settings-nav-item" data-settings-section="jobs"><span class="ui-tile settings-tile-jobs" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5" /><path d="M10 13h6M10 17h4" /></svg></span><span class="settings-nav-copy"><strong>Job instructions</strong><small>Added to every job run</small></span></button><button type="button" class="settings-nav-item" data-settings-section="accessibility"><span class="ui-tile settings-tile-accessibility" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg></span><span class="settings-nav-copy"><strong>Accessibility</strong><small>Text size, colours and motion</small></span></button><button type="button" class="settings-nav-item" data-settings-section="plugins"><span class="ui-tile settings-tile-plugins" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v5M15 3v5" /><path d="M6 8h12v3a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></svg></span><span class="settings-nav-copy"><strong>Plugins</strong><small>Pages, commands, themes, agents</small></span></button><button type="button" class="settings-nav-item" data-settings-section="automation"><span class="ui-tile settings-tile-automation" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 2l4 4-4 4" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a3 3 0 0 1-3 3H3" /></svg></span><span class="settings-nav-copy"><strong>Automation</strong><small>Sleep, wake and waiting work</small></span></button></nav>
+                <div class="settings-pane">
+                  <section id="settings-appearance" class="settings-section" data-section="appearance" aria-labelledby="settings-appearance-title">
+                    <h3 id="settings-appearance-title" class="settings-section-title">Appearance</h3><p class="settings-section-lead">Choose how Noai looks on this computer.</p>
+                    <div class="ui-group"><h4 class="ui-group-title">Theme</h4><div class="ui-list settings-card"><div id="theme-tools" class="theme-tools" hidden><input id="theme-search" class="theme-search" type="search" placeholder="Search themes" aria-label="Search themes" autocomplete="off" spellcheck="false" /><span id="theme-count" class="theme-count" role="status"></span></div><div id="theme-options" class="theme-options" role="radiogroup" aria-label="Theme"><label class="theme-choice"><input type="radio" name="theme" value="system" /><span class="theme-preview theme-preview-system" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice-name">System</span></label><label class="theme-choice"><input type="radio" name="theme" value="light" /><span class="theme-preview theme-preview-light" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice-name">Light</span></label><label class="theme-choice"><input type="radio" name="theme" value="dark" /><span class="theme-preview theme-preview-dark" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice-name">Dark</span></label><label class="theme-choice"><input type="radio" name="theme" value="matrix" /><span class="theme-preview theme-preview-matrix" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice-name">Matrix</span></label></div><p id="theme-empty" class="theme-empty" hidden>No themes match.</p><div id="theme-pages" class="theme-pages" hidden><button id="theme-prev" class="secondary-button is-compact" type="button" aria-label="Previous themes">‹ Previous</button><span id="theme-page-label"></span><button id="theme-next" class="secondary-button is-compact" type="button" aria-label="More themes">Next ›</button></div></div></div>
+                    <div class="ui-group"><h4 class="ui-group-title">Accent colour</h4><div class="ui-list settings-card"><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent colour"><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="purple" /><span class="palette-swatch palette-purple" aria-hidden="true"></span><span>Purple</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label></div><p class="settings-note">Used for buttons, highlights and your chat bubbles. The Matrix theme is always green.</p></div></div>
+                  </section>
+                  <section id="settings-jobs" class="settings-section" data-section="jobs" aria-labelledby="settings-jobs-title" hidden>
+                    <h3 id="settings-jobs-title" class="settings-section-title">Job instructions</h3><p class="settings-section-lead">Added to the start of every run, so you don’t have to repeat yourself in each job. Each run keeps a copy of exactly what it was sent. The daily digest has its own instructions.</p>
+                    <form id="job-instructions-form" class="job-instructions-group">
+                      <div class="ui-group"><h4 class="ui-group-title"><label for="job-instructions-recurring">Recurring jobs</label></h4><div class="ui-list settings-card"><textarea id="job-instructions-recurring" class="job-instructions-field" rows="5" maxlength="4000" placeholder="For example: Commit nothing. Keep a short changelog in NOTES.md."></textarea></div></div>
+                      <div class="ui-group"><h4 class="ui-group-title"><label for="job-instructions-one-time">One-time jobs</label></h4><div class="ui-list settings-card"><textarea id="job-instructions-one-time" class="job-instructions-field" rows="5" maxlength="4000" placeholder="For example: Explain what you changed in plain English at the end."></textarea></div></div>
+                      <div class="job-instructions-actions"><span id="job-instructions-status" class="field-help" role="status"></span><button id="job-instructions-save" class="primary-button" type="submit">Save instructions</button></div>
+                    </form>
+                  </section>
+                  <section id="settings-accessibility" class="settings-section" data-section="accessibility" aria-labelledby="settings-accessibility-title" hidden>
+                    <h3 id="settings-accessibility-title" class="settings-section-title">Accessibility</h3><p class="settings-section-lead">Make Noai easier to read and use on this computer. Changes apply straight away, in every Noai window.</p>
+                    <div class="ui-group"><h4 class="ui-group-title"><label for="text-size">Text size</label></h4><div class="ui-list settings-card"><div class="text-size-row"><span class="small-a" aria-hidden="true">A</span><input id="text-size" class="text-size-slider" type="range" min="85" max="150" step="5" value="100" aria-describedby="text-size-help" /><span class="large-a" aria-hidden="true">A</span><output id="text-size-value" for="text-size">100%</output></div><p id="text-size-help" class="settings-note">Scales everything (text, buttons and charts) together. <button id="text-size-reset" class="text-button" type="button">Reset to 100%</button></p></div></div>
+                    <div class="ui-group"><h4 class="ui-group-title">Colour vision</h4><div class="ui-list settings-card"><div id="vision-options" class="vision-options" role="radiogroup" aria-label="Colour vision"><label class="vision-choice vision-default"><input type="radio" name="vision" value="default" /><span class="vision-swatches" aria-hidden="true"><i></i><i></i><i></i></span><strong>Standard</strong><small>Green, red and orange</small></label><label class="vision-choice vision-red-green"><input type="radio" name="vision" value="red-green" /><span class="vision-swatches" aria-hidden="true"><i></i><i></i><i></i></span><strong>Red-green</strong><small>For protanopia and deuteranopia: blue and orange</small></label><label class="vision-choice vision-blue-yellow"><input type="radio" name="vision" value="blue-yellow" /><span class="vision-swatches" aria-hidden="true"><i></i><i></i><i></i></span><strong>Blue-yellow</strong><small>For tritanopia: green, red and pink</small></label></div><p class="settings-note">Changes status colours, chart lines and error types so they stay distinct. Charts also keep their labels and exact-number tables.</p></div></div>
+                    <div class="ui-group"><div class="ui-list"><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Increase contrast</span><span class="ui-row-subtitle">Darker secondary text and clearer dividers.</span></span><span class="ui-row-trailing"><input id="contrast-setting" class="ui-switch" type="checkbox" /></span></label><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Reduce motion</span><span class="ui-row-subtitle">Turns off animations, including the Matrix rain.</span></span><span class="ui-row-trailing"><input id="motion-setting" class="ui-switch" type="checkbox" /></span></label></div></div>
+                  </section>
+                  <section id="settings-plugins" class="settings-section" data-section="plugins" aria-labelledby="settings-plugins-title" hidden>
+                    <h3 id="settings-plugins-title" class="settings-section-title">Plugins</h3><p class="settings-section-lead">Plugins add pages to the sidebar, commands to ⌘K, colour themes and new agents. They live in ~/.noai/plugins, stay off until you turn them on, and can only do what’s listed under each one.</p>
+                    <div id="plugin-settings" class="ui-group"></div>
+                  </section>
+                  <section id="settings-automation" class="settings-section" data-section="automation" aria-labelledby="settings-automation-title" hidden>
+                    <h3 id="settings-automation-title" class="settings-section-title">Automation</h3><p class="settings-section-lead">What happens when work has to wait, or when you close the window.</p>
+                    <div class="ui-group"><div class="ui-list"><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Automatically resume after timed limits</span><span class="ui-row-subtitle">Continue a waiting task when its limit resets.</span></span><span class="ui-row-trailing"><input id="auto-resume-setting" class="ui-switch" type="checkbox" /></span></label><label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Keep the window in the tray when closed</span><span class="ui-row-subtitle">Closing or quitting the window doesn’t stop the scheduler service.</span></span><span class="ui-row-trailing"><input id="background-mode-setting" class="ui-switch" type="checkbox" /></span></label></div></div>
+                  
+                    <div class="ui-group"><h4 class="ui-group-title">Sleep</h4><div class="ui-list">
+                      <div class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Stay awake while a job runs</span><span class="ui-row-subtitle">The computer won’t go to sleep partway through a run. It can still sleep between jobs.</span></span><span class="ui-row-trailing"><span class="ui-pill is-good">Always on</span></span></div>
+                      <label class="ui-row no-leading"><span class="ui-row-copy"><span class="ui-row-title">Wake the computer for scheduled jobs</span><span id="wake-detail" class="ui-row-subtitle">Checking what this computer supports…</span></span><span class="ui-row-trailing"><input id="wake-setting" class="ui-switch" type="checkbox" disabled /></span></label>
+                    </div><p id="wake-status" class="settings-note" role="status"></p></div>
+                  </section>
+                </div>
+              </div>
+            </section>
+
+            <section id="view-plugin" class="page-view plugin-view" aria-label="Plugin page" hidden></section>
 
             <section id="view-models" class="page-view models-view" aria-labelledby="models-title" hidden>
               <div class="page-heading page-heading-actions"><div><h2 id="models-title">Models</h2><p>Every agent on this computer and the models it can use.</p></div><div class="page-actions"><span id="models-status" class="page-status" role="status"></span><button id="models-refresh" class="secondary-button" type="button">Refresh</button></div></div>
@@ -116,20 +169,19 @@
 
             <section id="view-home" class="page-view home-view" aria-labelledby="home-title" hidden>
               <div class="page-heading page-heading-actions"><div><h2 id="home-title">Dashboard</h2><p>How your agents have been doing, at a glance.</p></div><div class="page-actions"><button id="metrics-refresh" class="secondary-button" type="button">Refresh</button></div></div>
+              <section id="plans-overview" class="plans-overview" aria-label="Your plans and usage limits"></section>
               <section class="metrics-section" aria-labelledby="home-title">
                 <p id="metrics-status" class="metrics-status" role="status">Loading local agent history and Noai activity.</p>
                 <div class="metrics-controls">
                   <label><span class="sr-only">Harness</span><select id="metrics-harness" class="ui-popup"><option value="">All harnesses</option></select></label>
                   <label><span class="sr-only">Model</span><select id="metrics-model" class="ui-popup"><option value="">All models</option></select></label>
-                  <label><span class="sr-only">Period</span><select id="metrics-range" class="ui-popup"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="31d">Last 31 days</option><option value="all">All time</option></select></label>
-                  <label><span class="sr-only">Chart</span><select id="metrics-value" class="ui-popup"><option value="total">Total tokens</option><option value="cost">Recorded cost (USD)</option><option value="tools">Tool events</option></select></label>
-                <label class="chart-mode-control"><span class="sr-only">Display</span><select id="metrics-style" class="ui-popup"><option value="bar">Bar</option><option value="line">Line</option></select></label>
+                  <label><span class="sr-only">Period</span><select id="metrics-range" class="ui-popup"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="30d">Last 30 days</option><option value="all">All time</option></select></label>
                 </div>
                 <div id="metrics-totals" class="metrics-totals"></div>
                 <p id="metrics-job-summary" class="metrics-job-summary" role="status"></p>
                 <div id="metrics-insights" class="metrics-insights"></div>
-                <figure class="metrics-figure"><h3>Usage over time</h3><div id="metrics-chart"></div><figcaption id="metrics-chart-caption"></figcaption></figure>
-                <figure class="metrics-figure metrics-outcomes-figure"><h3>Calls and errors</h3><div id="metrics-outcomes"></div><figcaption>Successful calls are model responses plus tool calls that worked. Tool failures happened on this computer; connection, rate-limit and API errors came from reaching the provider. Read from local agent history; Noai jobs are included once their agent records them.</figcaption></figure>
+                <figure class="metrics-figure"><div class="metrics-figure-head"><h3>Usage over time</h3><div class="metrics-figure-controls"><label><span class="sr-only">Show</span><select id="metrics-value" class="ui-popup"><option value="total">Tokens</option><option value="cost">Cost (USD)</option><option value="tools">Tool events</option></select></label><label><span class="sr-only">Chart type</span><select id="metrics-style" class="ui-popup"><option value="bar">Bar graph</option><option value="line">Line graph</option></select></label></div></div><div id="metrics-chart"></div><figcaption id="metrics-chart-caption"></figcaption></figure>
+                <figure class="metrics-figure metrics-outcomes-figure"><div class="metrics-figure-head"><h3>Calls and errors</h3><div class="metrics-figure-controls"><label><span class="sr-only">Calls and errors chart type</span><select id="metrics-outcomes-style" class="ui-popup"><option value="bar">Bar graph</option><option value="line">Line graph</option></select></label></div></div><div id="metrics-outcomes"></div><figcaption>Successful calls are model responses plus tool calls that worked. Tool failures happened on this computer; connection, rate-limit and API errors came from reaching the provider. Read from local agent history; Noai jobs are included once their agent records them.</figcaption></figure>
                 <details class="metrics-daily-section"><summary>Explore daily totals</summary><section aria-labelledby="metrics-daily-title"><h3 id="metrics-daily-title">Daily totals</h3><div class="metrics-table-wrap"><table class="metrics-table metrics-daily-table"><thead><tr><th scope="col">Date</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cached input</th><th scope="col">Total tokens</th><th scope="col">Tool events</th></tr></thead><tbody id="metrics-daily"></tbody></table><p id="metrics-daily-empty" class="metrics-empty">No recorded activity for these filters.</p></div><p class="metrics-daily-note">Dates use your local time. Cached input is included in input and total tokens.</p></section></details>
                 <section class="metrics-tools-section" aria-label="Tool activity breakdown"><h3>Tool activity</h3><div id="metrics-tools" class="metrics-tools"></div></section>
                 <div class="metrics-table-wrap"><table class="metrics-table"><thead><tr><th scope="col">Harness</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Tool events</th><th scope="col">Sessions / runs</th></tr></thead><tbody id="metrics-breakdown"></tbody></table><p id="metrics-breakdown-empty" class="metrics-empty">No recorded activity for these filters.</p></div>
@@ -145,7 +197,13 @@
               <div id="sessions-filters" class="sessions-filters"></div>
               <div class="ui-toolbar">
                 <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><span class="sr-only">Search sessions</span><input id="sessions-search" type="search" placeholder="Search sessions, projects, models" spellcheck="false" /></label>
-                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="ui-popup"><option value="recent">Recent</option><option value="oldest">Oldest</option><option value="title">Name</option><option value="tokens">Most tokens</option><option value="context">Fullest context</option></select></label>
+                <label><span class="sr-only">Sort sessions</span><select id="sessions-sort" class="ui-popup"><option value="recent">Recent</option><option value="oldest">Oldest</option><option value="title">Name</option><option value="tokens">Most tokens</option><option value="fewest-tokens">Fewest tokens</option><option value="messages">Most messages</option><option value="duration">Longest</option><option value="context">Fullest context</option></select></label>
+              </div>
+              <div class="ui-toolbar sessions-filter-bar">
+                <label><span class="sr-only">Model</span><select id="sessions-model" class="ui-popup"><option value="">All models</option></select></label>
+                <label><span class="sr-only">Folder</span><select id="sessions-folder" class="ui-popup"><option value="">All folders</option></select></label>
+                <label><span class="sr-only">Updated</span><select id="sessions-period" class="ui-popup"><option value="">Any time</option><option value="1">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+                <button id="sessions-clear" class="text-button" type="button" hidden>Clear filters</button>
               </div>
               <div class="sessions-list-meta"><span id="sessions-count"></span><span id="sessions-status" role="status"></span></div>
               <div id="sessions-body" class="ui-list sessions-list" aria-label="Sessions"></div>
@@ -158,6 +216,7 @@
               <button id="session-open-conversation" class="primary-button" type="button">Open conversation</button>
               <details id="session-original-prompt" class="job-prompt" hidden><summary>Original recorded prompt</summary><p class="scheduled-card-instructions"></p></details>
               <section id="session-statistics" class="session-stats" aria-label="Session stats"></section>
+              <section id="session-analytics" class="item-analytics" aria-label="Session usage charts"></section>
               <details class="session-file"><summary>Session details</summary><p id="session-source"></p></details>
               <div id="session-conversation" hidden><h3 class="session-conversation-heading">Conversation</h3>
               <p id="session-detail-status" role="status"></p><div id="session-transcript"></div><button id="session-load-more" class="secondary-button" type="button" hidden>Load more messages</button></div>
@@ -237,14 +296,8 @@
                 <div class="digest-actions"><span id="digest-form-status" role="status"></span><button id="digest-save" class="primary-button" type="submit">Save</button></div>
               </form>
             </section>
-              <section class="digest-history" aria-labelledby="digest-history-title"><h3 id="digest-history-title">Earlier digests</h3><div id="digest-history" class="digest-history-list"></div></section>
-            </section>
           </main>
 
-          <aside id="details-panel" class="details-panel" aria-label="Conversation details" hidden>
-            <div class="details-heading"><div><h2>Details</h2></div><button class="icon-button" type="button" aria-label="Close details" data-action="close-details"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
-            <div id="details-content" class="details-content"><p class="details-empty">Project and conversation details will appear here.</p></div>
-          </aside>
         </div>
       </div>
     </div>
@@ -260,7 +313,7 @@
                   <div class="scheduled-field"><label for="scheduled-model">Model</label><select id="scheduled-model" class="text-field"><option value="">Agent default</option></select><label id="scheduled-custom-model-label" for="scheduled-custom-model" hidden>Custom model ID</label><input id="scheduled-custom-model" class="text-field" type="text" placeholder="Exact model ID" spellcheck="false" hidden /></div>
                   <label class="scheduled-field scheduled-field-wide"><span>Project folder <small>(optional)</small></span><input id="scheduled-project" class="text-field" type="text" placeholder="Leave empty for a new job folder" spellcheck="false" /><small>Leave empty to create a separate folder for this job under ~/.noai.</small><button id="scheduled-current-project" type="button" class="scheduled-link-button">Use current project</button></label>
                 </div>
-                <fieldset class="scheduled-choice"><legend>Start</legend><label><input type="radio" name="scheduled-start" value="now" checked /> Run now</label><label><input type="radio" name="scheduled-start" value="later" /> At a chosen time</label></fieldset>
+                <fieldset id="scheduled-start-choice" class="scheduled-choice"><legend>Start</legend><label><input type="radio" name="scheduled-start" value="now" checked /> Run now</label><label><input type="radio" name="scheduled-start" value="later" /> At a chosen time</label></fieldset>
                 <label id="scheduled-time-wrap" class="scheduled-field scheduled-time-wrap" hidden><span>Start time <small>(your local time)</small></span><input id="scheduled-time" class="text-field" type="datetime-local" step="1" aria-describedby="scheduled-time-help" /><small id="scheduled-time-help">Clock-change gaps are rejected. If an hour repeats, the first occurrence is used. To select the second, use CLI --at with an explicit timezone offset.</small></label>
                 <fieldset class="scheduled-choice"><legend>Repeat</legend><label><input type="radio" name="scheduled-repeat" value="once" checked /> One time</label><label><input type="radio" name="scheduled-repeat" value="interval" /> Every interval</label></fieldset>
                 <div id="scheduled-interval-wrap" class="scheduled-interval-wrap" hidden><label class="scheduled-field"><span>Every</span><input id="scheduled-interval" class="text-field" type="number" min="1" step="1" value="1" inputmode="numeric" /></label><label class="scheduled-field"><span>Unit</span><select id="scheduled-interval-unit" class="text-field"><option value="3600">Hours</option><option value="60">Minutes</option><option value="86400">Days</option><option value="1">Seconds</option></select></label></div>
@@ -271,13 +324,15 @@
                 <div class="scheduled-form-actions"><span id="scheduled-form-status" role="status"></span><button id="scheduled-edit-cancel" class="secondary-button" type="button">Cancel</button><button id="scheduled-submit" class="primary-button" type="submit">Create job</button></div>
               </form>
     </dialog>
-    <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><div><h2 id="settings-title">Settings</h2></div><button id="settings-close" class="icon-button" type="button" aria-label="Close settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
-      <div class="dialog-body">
-        <fieldset class="settings-group"><legend>Appearance</legend><p>Choose how Noai looks on this device.</p><div id="theme-options" class="segmented-options" role="radiogroup" aria-label="Appearance"><label><input type="radio" name="theme" value="system" /><span>System</span></label><label><input type="radio" name="theme" value="light" /><span>Light</span></label><label><input type="radio" name="theme" value="dark" /><span>Dark</span></label></div></fieldset>
-        <fieldset class="settings-group"><legend>Accent color</legend><p>Used for buttons, highlights and your chat bubbles.</p><div id="palette-options" class="palette-options" role="radiogroup" aria-label="Accent color"><label><input type="radio" name="palette" value="blue" /><span class="palette-swatch palette-blue" aria-hidden="true"></span><span>Blue</span></label><label><input type="radio" name="palette" value="purple" /><span class="palette-swatch palette-purple" aria-hidden="true"></span><span>Purple</span></label><label><input type="radio" name="palette" value="sage" /><span class="palette-swatch palette-sage" aria-hidden="true"></span><span>Sage</span></label><label><input type="radio" name="palette" value="amber" /><span class="palette-swatch palette-amber" aria-hidden="true"></span><span>Amber</span></label><label><input type="radio" name="palette" value="graphite" /><span class="palette-swatch palette-graphite" aria-hidden="true"></span><span>Graphite</span></label></div></fieldset>
-        <fieldset class="settings-group automation-group"><legend>Automation</legend><p>Choose what happens when work has to wait or you close the window.</p><label class="setting-toggle"><input id="auto-resume-setting" type="checkbox" /><span><strong>Automatically resume after timed limits</strong><small>Continue a waiting task when its limit resets.</small></span></label><label class="setting-toggle"><input id="background-mode-setting" type="checkbox" /><span><strong>Keep the window in the tray when closed</strong><small>Closing or quitting the window does not stop the scheduler service.</small></span></label></fieldset>
-      </div>
+    <div id="plugin-workers" class="plugin-workers" hidden></div>
+    <dialog id="palette-dialog" class="palette-dialog" aria-label="Command palette">
+      <input id="palette-input" class="palette-input" type="search" placeholder="Type a command…" autocomplete="off" spellcheck="false" aria-controls="palette-list" />
+      <div id="palette-list" class="palette-list" role="listbox"></div>
+      <p class="palette-footer">↑↓ to choose · Enter to run · Esc to close</p>
+    </dialog>
+    <dialog id="changelog-dialog" class="model-dialog changelog-dialog" aria-labelledby="changelog-title">
+      <div class="dialog-heading"><div><h2 id="changelog-title">What’s new</h2><p class="field-help">Noai version history</p></div><button id="changelog-close" class="icon-button" type="button" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
+      <div id="changelog-body" class="dialog-body changelog-body"></div>
     </dialog>
     <dialog id="model-dialog" class="model-dialog" aria-labelledby="model-dialog-title">
       <form id="custom-model-form" method="dialog">

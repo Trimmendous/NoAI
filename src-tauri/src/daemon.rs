@@ -3,6 +3,8 @@ use crate::{control, engine, platform};
 use std::sync::Arc;
 
 pub fn run() -> Result<(), String> {
+    // Record which build this is before the file can be replaced by a rebuild.
+    let _ = crate::ipc::build_stamp();
     let home = platform::home_dir()?;
     let dir = platform::app_data_dir()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()

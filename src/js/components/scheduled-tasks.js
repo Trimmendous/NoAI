@@ -4,6 +4,7 @@ import { basename, element } from './dom.js';
 import { renderMarkdown } from './markdown.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
+import { renderItemAnalytics } from './item-analytics.js';
 import { group as uiGroup, icon as uiIcon, pill, row as uiRow } from './ui.js';
 
 const $ = selector => document.querySelector(selector);
@@ -110,6 +111,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   let refreshing = null;
   let busy = false;
   let editing = null;
+  const ENDED = new Set(['cancelled', 'completed']);
+  const canEdit = task => !!edit && !ENDED.has(task.status) && !task.kind;
   let editLocked = false;
   let renderedSignature = '';
   let filter = 'scheduled';
@@ -126,6 +129,25 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     }).finally(() => { metricsRequest = null; });
     return metricsRequest;
   }
+  /**
+   * Every metric record that belongs to a job: its runs, and the agent
+   * sessions those runs created. Without recorded metrics, the runs' own
+   * saved events stand in.
+   */
+  function jobRows(task, runs, metrics) {
+    const runIds = new Set(runs.map(run => run.runId));
+    const sessions = new Set(runs.flatMap(run => (run.events || []).map(event => event.resumeId).filter(Boolean)));
+    const matched = metrics.filter(row => runIds.has(row.runId) || (row.sessionId && sessions.has(row.sessionId)));
+    if (matched.length) return matched;
+    return normalizeMetrics(runs.flatMap(run => (run.events || []).map((event, index) => ({
+      ...event, id: `${run.runId}:${event.eventId ?? index}`, runId: run.runId,
+      harness: run.harness || task.harness, model: event.model || run.model || task.model || '',
+      sessionId: event.resumeId, at: event.at || run.startedAt, tool: event.type === 'activity' ? event.text : undefined,
+    }))));
+  }
+  const analytics = element('section', 'item-analytics job-analytics');
+  analytics.setAttribute('aria-label', 'Job usage charts');
+
   let selectedJob = null;
   let selectedRun = null;
   // Recurring jobs open on an overview with their runs; a run opens on its own.
@@ -175,7 +197,9 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     permissionControls();
     $('#scheduled-bypass-label').textContent = `Dangerously bypass permissions for ${getHarness(harnessNode.value)?.label || harnessNode.value}`;
     $('#scheduled-bypass-description').textContent = getHarness(harnessNode.value)?.bypassDescription || '';
-    const later = form.elements['scheduled-start'].value === 'later';
+    const untimed = !!editing && !editing.timed;
+    $('#scheduled-start-choice').hidden = untimed;
+    const later = !untimed && form.elements['scheduled-start'].value === 'later';
     const repeating = form.elements['scheduled-repeat'].value === 'interval';
     $('#scheduled-time-wrap').hidden = !later;
     $('#scheduled-time').required = later;
@@ -238,11 +262,11 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   function lockEditor() {
     if (!editing) return;
     const latest = tasks.find(task => task.id === editing.id);
-    editLocked = !latest || latest.status !== 'scheduled' || (latest.lastRunId || null) !== editing.lastRunId;
+    editLocked = !latest || ENDED.has(latest.status);
     submit.disabled = busy || editLocked || !native;
     form.querySelectorAll('input, select, textarea').forEach(node => { node.disabled = editLocked; });
     permissionControls();
-    if (editLocked) $('#scheduled-form-status').textContent = 'This job has started or changed. Editing is closed; cancel editing to return to the list.';
+    if (editLocked) $('#scheduled-form-status').textContent = 'This job has ended, so it can’t be edited. Use Run again to start a new one.';
   }
   // Copies a job's settings into the sheet. Returns false if the sheet moved on.
   async function fillForm(task, isCurrent) {
@@ -286,38 +310,31 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     updateControls();
   }
 
+  // Editing keeps the job, its runs and its state. A running job finishes
+  // with its old settings; the changes apply from the next run.
   async function beginEdit(task) {
-    if (busy || task.status !== 'scheduled') return;
-    resetForm(); editing = {id:task.id, lastRunId:task.lastRunId || null};
-    openSheet();
+    if (busy || !canEdit(task)) return;
+    resetForm();
+    const timed = ['scheduled', 'paused'].includes(task.status);
+    editing = { id: task.id, lastRunId: task.lastRunId || null, timed };
     $('#scheduled-form-title').textContent = 'Edit job';
+    $('#scheduled-form-title').nextElementSibling.textContent = timed
+      ? `Past runs keep the settings they ran with.${task.status === 'paused' ? ' The job stays paused until you resume it.' : ''}`
+      : task.status === 'running' || task.status === 'waiting'
+        ? 'A run is in progress and finishes with the old settings. Your changes apply from the next run.'
+        : 'Your changes apply when you retry the job or when its next run starts.';
     submit.textContent = 'Save changes';
-    $('#scheduled-title-input').value = task.title;
-    $('#scheduled-prompt').value = task.prompt;
-    $('#scheduled-project').value = task.projectPath || '';
-    harnessNode.value = task.harness;
-    $('#scheduled-auto-resume').checked = task.autoResume;
-    $('#scheduled-bypass-permissions').checked = !!task.dangerouslyBypassPermissions;
-    permissionControls(true);
-    $('#scheduled-permissions').value = task.permissions || 'provider-default';
-    form.elements['scheduled-start'].value = 'later';
-    const date = new Date((task.nextRunAt || Date.now()/1000) * 1000);
-    $('#scheduled-time').value = new Date(date.getTime() - date.getTimezoneOffset()*60000).toISOString().slice(0,19);
-    form.elements['scheduled-repeat'].value = task.intervalSeconds ? 'interval' : 'once';
-    if (task.intervalSeconds) {
-      const unit = [86400, 3600, 60, 1].find(unit => task.intervalSeconds % unit === 0);
-      $('#scheduled-interval-unit').value = String(unit);
-      $('#scheduled-interval').value = task.intervalSeconds / unit;
-    }
-    modelNode.value = ''; updateControls();
-    await updateModels();
-    if (editing?.id !== task.id) return;
-    const known = [...modelNode.options].some(option => option.value === task.model);
-    modelNode.value = task.model ? known ? task.model : '__custom__' : '';
-    customModelNode.value = task.model || ''; updateCustomModel();
-    $('#scheduled-form-status').textContent = 'Changes apply to the next run. Saving closes once it starts.';
-    lockEditor();
     openSheet();
+    const token = editing;
+    if (!await fillForm(task, () => editing === token)) return;
+    const due = task.nextRunAt || 0;
+    if (timed && due > Date.now() / 1000 + 60) {
+      form.elements['scheduled-start'].value = 'later';
+      const date = new Date(due * 1000);
+      $('#scheduled-time').value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+    } else form.elements['scheduled-start'].value = 'now';
+    updateControls();
+    lockEditor();
   }
   $('#scheduled-edit-cancel').addEventListener('click', () => {
     if (busy) return;
@@ -384,8 +401,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     if (task.status === 'paused' && resume) nodes.push(button('Resume', () => act('resume the job', () => resume(task.id), 'Job resumed.'), `secondary-button${small}`));
     const retryNode = (!run || run.runId === task.lastRunId) ? retryButton(task) : null;
     if (retryNode) { if (compact) retryNode.classList.add('is-compact'); nodes.push(retryNode); }
-    if (!compact && (['completed', 'failed', 'cancelled', 'needs_attention'].includes(task.status))) nodes.push(button(task.intervalSeconds && !['cancelled', 'completed'].includes(task.status) ? 'Edit and restart…' : 'Run again…', () => void beginCopy(task)));
-    if (!compact && task.status === 'scheduled' && edit) nodes.push(button('Edit', () => void beginEdit(task)));
+    if (!compact && canEdit(task)) nodes.push(button('Edit', () => void beginEdit(task)));
+    if (!compact && (ENDED.has(task.status) || (!task.intervalSeconds && ['failed', 'needs_attention'].includes(task.status)))) nodes.push(button('Run again…', () => void beginCopy(task)));
     if (task.status === 'scheduled' && pause) nodes.push(button('Pause', () => act('pause the job', () => pause(task.id), 'Job paused. It won’t start again until you resume it.'), `secondary-button${small}`));
     if (['scheduled', 'running', 'waiting', 'needs_attention', 'paused', 'failed'].includes(task.status) && !(task.status === 'failed' && !task.intervalSeconds)) {
       // Two taps: the first asks, the second cancels. Nothing else to undo it.
@@ -453,7 +470,10 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
         className: 'job-run-row',
       });
     });
-    content.replaceChildren(summary, actions, stats, prompt);
+    content.replaceChildren(summary, actions, stats, prompt, analytics);
+    // The same charts as the Dashboard, for this job only.
+    renderItemAnalytics(analytics, jobRows(task, runs, metricsCache), { what: 'this job' });
+    void sessionMetrics().then(metrics => { if (analytics.isConnected) renderItemAnalytics(analytics, jobRows(task, runs, metrics), { what: 'this job' }); }).catch(() => {});
     if (runErrors.has(task.id)) content.append(element('p', 'ui-footnote', runErrors.get(task.id)));
     if (rows.length) content.append(uiGroup(`Runs · ${runs.length}`, rows, 'Runs'));
     else content.append(uiGroup('Runs', [element('p', 'ui-list-empty', task.nextRunAt ? `No runs yet. The first one starts ${formatShortTime(task.nextRunAt)}.` : 'No runs yet.')], 'Runs'));
@@ -561,8 +581,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     else fragment.append(element('p', 'scheduled-empty', 'The original prompt was not saved with this occurrence. The job’s current prompt is available on its detail page.'));
     for (const event of run?.events || []) {
       if (!event.text) continue;
-      const role = event.type === 'text' ? 'Assistant' : event.type === 'reasoning' || event.type === 'thinking' ? 'Thinking' : event.type === 'activity' ? 'Tool activity' : event.type;
-      message(role, event.text, !['text', 'error'].includes(event.type));
+      const role = event.type === 'text' ? 'Assistant' : event.type === 'reasoning' || event.type === 'thinking' ? 'Thinking' : event.type === 'activity' ? 'Tool activity' : event.type === 'notice' ? 'Warning' : event.type;
+      message(role, event.text, !['text', 'error', 'notice'].includes(event.type));
     }
     if (!(run?.events || []).some(event => event.text)) fragment.append(element('p', 'scheduled-empty', runErrors.has(task.id) ? 'Could not load saved history. Return to the job and refresh to retry.' : run && ['running', 'waiting'].includes(run.status) ? 'No conversation output recorded yet.' : 'No conversation history was saved for this occurrence. A transcript cannot be displayed.'));
     stream.replaceChildren(fragment);
@@ -734,7 +754,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     const title = $('#scheduled-title-input').value.trim();
     const prompt = $('#scheduled-prompt').value.trim();
     if (!title || !prompt) { form.reportValidity(); return; }
-    const later = form.elements['scheduled-start'].value === 'later';
+    const later = !(editing && !editing.timed) && form.elements['scheduled-start'].value === 'later';
     let startAt;
     try {
       startAt = later ? parseLocalTime($('#scheduled-time').value) : Math.floor(Date.now() / 1000);

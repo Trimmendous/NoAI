@@ -554,7 +554,26 @@ fn codex_window(label: String, value: &Value) -> Option<ProviderUsageWindow> {
     if !(0.0..=100.0).contains(&percent) {
         return None;
     }
+    // Codex reports each window's length; name the window after it when it does.
+    let window_seconds = value
+        .get("windowDurationMins")
+        .and_then(Value::as_u64)
+        .filter(|minutes| *minutes > 0)
+        .map(|minutes| minutes * 60);
+    let label = match window_seconds {
+        Some(seconds) if label == "Primary" || label == "Secondary" => {
+            crate::providers::window_label(seconds)
+        }
+        Some(seconds) => match label.rsplit_once(" · ") {
+            Some((name, "primary" | "secondary")) => {
+                format!("{name} · {}", crate::providers::window_label(seconds))
+            }
+            _ => label,
+        },
+        None => label,
+    };
     Some(ProviderUsageWindow {
+        window_seconds,
         label,
         unit: None,
         used_percent: Some(percent),
@@ -749,6 +768,36 @@ mod tests {
         assert_eq!(
             account_fingerprint("codex").as_deref(),
             Some("codex:account-1")
+        );
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[test]
+    fn codex_windows_use_the_reported_length() {
+        let window = codex_window(
+            "Primary".into(),
+            &serde_json::json!({"usedPercent": 40, "windowDurationMins": 300, "resetsAt": 5}),
+        )
+        .unwrap();
+        assert_eq!(
+            (window.label.as_str(), window.window_seconds),
+            ("5-hour limit", Some(18_000))
+        );
+        let weekly = codex_window(
+            "GPT-5 · secondary".into(),
+            &serde_json::json!({"usedPercent": 10, "windowDurationMins": 10080}),
+        )
+        .unwrap();
+        assert_eq!(weekly.label, "GPT-5 · Weekly limit");
+        let unknown =
+            codex_window("Primary".into(), &serde_json::json!({"usedPercent": 10})).unwrap();
+        assert_eq!(
+            (unknown.label.as_str(), unknown.window_seconds),
+            ("Primary", None)
         );
     }
 }

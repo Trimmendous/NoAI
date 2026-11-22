@@ -161,6 +161,43 @@ pub struct StoredEvent {
 struct Journal {
     tasks: Vec<Task>,
     runs: Vec<TaskRun>,
+    #[serde(default)]
+    instructions: JobInstructions,
+}
+
+/// The user's standing instructions, added to every run of every job of
+/// that kind (the digest has its own). Each run saves the full prompt it was sent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobInstructions {
+    #[serde(default)]
+    pub recurring: String,
+    #[serde(default)]
+    pub one_time: String,
+}
+
+const MAX_INSTRUCTIONS: usize = 4000;
+
+fn with_instructions(instructions: &JobInstructions, task: &Task) -> String {
+    let global = if task.interval_seconds.is_some() {
+        &instructions.recurring
+    } else {
+        &instructions.one_time
+    };
+    if global.trim().is_empty() {
+        task.prompt.clone()
+    } else {
+        format!(
+            "Standing instructions for all my {} jobs:\n{}\n\nThis job:\n{}",
+            if task.interval_seconds.is_some() {
+                "recurring"
+            } else {
+                "one-time"
+            },
+            global.trim(),
+            task.prompt
+        )
+    }
 }
 
 pub struct ScheduledTasks {
@@ -331,9 +368,9 @@ impl ScheduledTasks {
                 .position(|task| task.id == id)
                 .ok_or("Scheduled task not found")?;
             let previous = journal.tasks[index].clone();
-            if previous.status != "scheduled" || previous.last_run_id != expected_last_run_id {
+            if matches!(previous.status.as_str(), "cancelled" | "completed") {
                 return Err(
-                    "This job has already started or changed. Refresh before editing its next run."
+                    "This job has ended. Use Run again to start a new one with these settings."
                         .into(),
                 );
             }
@@ -350,11 +387,23 @@ impl ScheduledTasks {
             if is_digest(&previous) {
                 return Err("Change the daily digest from the Digest tab.".into());
             }
+            // Waiting jobs take the new start time. A running job keeps going
+            // with its old settings and the changes apply from the next run;
+            // a job that stopped keeps its state until Retry. If a run started
+            // and ended while the form was open, the edited start time is stale.
+            let restarted = previous.last_run_id != expected_last_run_id;
+            let next_run_at = match previous.status.as_str() {
+                "scheduled" | "paused" if !restarted => replacement.next_run_at,
+                _ => previous.next_run_at,
+            };
             let updated = Task {
                 id: previous.id,
                 created_at: previous.created_at,
                 last_run_id: previous.last_run_id,
                 last_result: previous.last_result,
+                status: previous.status,
+                pending_resume_id: previous.pending_resume_id,
+                next_run_at,
                 ..replacement
             };
             journal.tasks[index] = updated.clone();
@@ -462,6 +511,40 @@ impl ScheduledTasks {
             task.next_run_at = Some(due);
             task.status = "scheduled".into();
             Ok(task.clone())
+        })
+    }
+
+    /// The earliest time a job (the digest included) is due to start.
+    pub fn next_due(&self) -> Option<u64> {
+        self.journal
+            .lock()
+            .unwrap()
+            .tasks
+            .iter()
+            .filter(|task| task.status == "scheduled")
+            .filter_map(|task| task.next_run_at)
+            .min()
+    }
+
+    pub fn instructions(&self) -> JobInstructions {
+        self.journal.lock().unwrap().instructions.clone()
+    }
+
+    pub fn set_instructions(&self, input: JobInstructions) -> Result<JobInstructions, String> {
+        let clean = JobInstructions {
+            recurring: input.recurring.trim().to_owned(),
+            one_time: input.one_time.trim().to_owned(),
+        };
+        if clean.recurring.chars().count() > MAX_INSTRUCTIONS
+            || clean.one_time.chars().count() > MAX_INSTRUCTIONS
+        {
+            return Err(format!(
+                "Instructions must be {MAX_INSTRUCTIONS} characters or fewer"
+            ));
+        }
+        self.update(|journal| {
+            journal.instructions = clean.clone();
+            Ok(clean)
         })
     }
 
@@ -633,6 +716,7 @@ impl ScheduledTasks {
         }
         self.update(|journal| {
             let mut claims = Vec::new();
+            let instructions = journal.instructions.clone();
             for task in &mut journal.tasks {
                 if task.status != "scheduled" || task.next_run_at.is_none_or(|due| due > at) {
                     continue;
@@ -641,9 +725,10 @@ impl ScheduledTasks {
                 let run_id = unique_id("scheduled-run");
                 let conversation_id = unique_id("scheduled-conversation");
                 let resume_id = task.pending_resume_id.take();
+                let base = if is_digest(task) { task.prompt.clone() } else { with_instructions(&instructions, task) };
                 let prompt = if resume_id.is_some() {
-                    format!("Continue this interrupted job. Inspect what is already completed, preserve existing work, and do not repeat completed actions. Original job instructions:\n\n{}", task.prompt)
-                } else { task.prompt.clone() };
+                    format!("Continue this interrupted job. Inspect what is already completed, preserve existing work, and do not repeat completed actions. Original job instructions:\n\n{base}")
+                } else { base };
                 let request = RunRequest {
                     run_id: run_id.clone(),
                     conversation_id: conversation_id.clone(),
@@ -797,6 +882,122 @@ mod tests {
     use super::*;
 
     #[test]
+    fn edit_applies_to_running_and_paused_jobs() {
+        let dir = std::env::temp_dir().join(unique_id("noai-edit-test"));
+        fs::create_dir_all(&dir).unwrap();
+        let store = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let input = |prompt: &str, interval: u64| CreateTaskInput {
+            title: "Job".into(),
+            prompt: prompt.into(),
+            harness: "claude".into(),
+            model: None,
+            project_path: dir.to_string_lossy().into_owned(),
+            start_at: now() + 600,
+            interval_seconds: Some(interval),
+            auto_resume: false,
+            dangerously_bypass_permissions: false,
+            permissions: None,
+        };
+        let task = store.create(input("old", 3600)).unwrap();
+        store.pause(&task.id).unwrap();
+        let edited = store
+            .edit(
+                &task.id,
+                CreateTaskInput {
+                    model: Some("m2".into()),
+                    ..input("new", 7200)
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (
+                edited.status.as_str(),
+                edited.prompt.as_str(),
+                edited.interval_seconds,
+                edited.model.as_deref()
+            ),
+            ("paused", "new", Some(7200), Some("m2"))
+        );
+        store.resume(&task.id).unwrap();
+        let claimed = store.claim_due(now() + 7200).unwrap();
+        assert_eq!(claimed[0].1.prompt, "new");
+        let run_id = claimed[0].0.last_run_id.clone();
+        let edited = store
+            .edit(&task.id, input("newer", 60), run_id.clone())
+            .unwrap();
+        assert_eq!(
+            (edited.status.as_str(), edited.next_run_at),
+            ("running", None)
+        );
+        let finished = store
+            .finish(run_id.as_deref().unwrap(), "completed", "ok".into(), now())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (finished.prompt.as_str(), finished.interval_seconds),
+            ("newer", Some(60))
+        );
+        store.cancel(&task.id).unwrap();
+        assert!(store.edit(&task.id, input("x", 60), run_id).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn standing_instructions_apply_by_job_kind() {
+        let dir = std::env::temp_dir().join(unique_id("noai-instructions-test"));
+        fs::create_dir_all(&dir).unwrap();
+        let store = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let input = |interval: Option<u64>| CreateTaskInput {
+            title: "Job".into(),
+            prompt: "Do the thing".into(),
+            harness: "claude".into(),
+            model: None,
+            project_path: dir.to_string_lossy().into_owned(),
+            start_at: now(),
+            interval_seconds: interval,
+            auto_resume: false,
+            dangerously_bypass_permissions: false,
+            permissions: None,
+        };
+        store.create(input(Some(3600))).unwrap();
+        store.create(input(None)).unwrap();
+        store
+            .set_instructions(JobInstructions {
+                recurring: " Be brief. ".into(),
+                one_time: String::new(),
+            })
+            .unwrap();
+        assert!(store
+            .set_instructions(JobInstructions {
+                recurring: "x".repeat(4001),
+                one_time: String::new()
+            })
+            .is_err());
+        let claims = store.claim_due(now() + 1).unwrap();
+        let prompt = |recurring: bool| {
+            claims
+                .iter()
+                .find(|(task, _)| task.interval_seconds.is_some() == recurring)
+                .unwrap()
+                .1
+                .prompt
+                .clone()
+        };
+        assert!(prompt(true).contains("Be brief.") && prompt(true).ends_with("Do the thing"));
+        assert_eq!(prompt(false), "Do the thing");
+        drop(store);
+        assert_eq!(
+            ScheduledTasks::open_in_dir(&dir)
+                .unwrap()
+                .instructions()
+                .recurring,
+            "Be brief."
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn pause_and_resume_skip_missed_occurrences() {
         let dir = std::env::temp_dir().join(unique_id("noai-pause-test"));
         let store = ScheduledTasks::open_in_dir(&dir).unwrap();
@@ -824,10 +1025,11 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+        let before = now();
         let resumed = store.resume(&task.id).unwrap();
         assert_eq!(resumed.status, "scheduled");
         let due = resumed.next_run_at.unwrap();
-        assert!(due >= now() && due <= now() + 60);
+        assert!(due >= before && due <= now() + 60);
         assert!(store.resume(&task.id).is_err());
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1019,11 +1221,20 @@ mod tests {
         );
         assert_eq!(request.model.as_deref(), Some("test-model"));
         assert_eq!(request.prompt, "New instructions");
-        assert!(store.edit(&task.id, original.clone(), None).is_err());
+        // A running job can be edited; the change applies from the next run.
+        let running = store.edit(&task.id, changes.clone(), None).unwrap();
+        assert_eq!(
+            (running.status.as_str(), running.next_run_at),
+            ("running", None)
+        );
         store.waiting(&request.run_id).unwrap();
-        assert!(store
-            .edit(&task.id, original.clone(), Some(request.run_id.clone()))
-            .is_err());
+        assert_eq!(
+            store
+                .edit(&task.id, changes.clone(), Some(request.run_id.clone()))
+                .unwrap()
+                .status,
+            "running"
+        );
         store
             .finish(
                 &request.run_id,
@@ -1032,8 +1243,15 @@ mod tests {
                 changes.start_at + 1,
             )
             .unwrap();
-        // A stale editor cannot silently change a later occurrence after its run completed.
-        assert!(store.edit(&task.id, original.clone(), None).is_err());
+        // A stale editor's start time doesn't move the occurrence the finished run scheduled.
+        let scheduled = store.list()[0].next_run_at;
+        assert_eq!(
+            store
+                .edit(&task.id, changes.clone(), None)
+                .unwrap()
+                .next_run_at,
+            scheduled
+        );
         let updated = store
             .edit(&task.id, original.clone(), Some(request.run_id.clone()))
             .unwrap();

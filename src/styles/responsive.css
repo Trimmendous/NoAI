@@ -1,7 +1,6 @@
 .mobile-menu, .sidebar-close { display: none; }
 
 @media (max-width: 1080px) {
-  .details-panel:not([hidden]) { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: 290px; box-shadow: -10px 0 28px var(--shadow); }
   .content-frame { position: relative; }
 }
 
@@ -19,7 +18,6 @@
   .messages { padding: 20px 16px; }
   .composer-dock { padding: 0 12px 12px; }
   .page-view { padding: 38px 21px 60px; }
-  .details-panel:not([hidden]) { top: 0; width: min(290px, 100%); }
 }
 
 @media (max-width: 440px) {
@@ -38,7 +36,6 @@
   .account-header, .resume-card-header { flex-wrap: wrap; }
   .account-card, .resume-card { padding: 15px; }
   .usage-window-header { flex-wrap: wrap; gap: 2px 8px; }
-  .settings-dialog { max-height: calc(100dvh - 20px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

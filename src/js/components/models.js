@@ -1,7 +1,8 @@
 import { element } from './dom.js';
 import { getHarness } from '../core/catalog.js';
 import { normalizeMetrics } from '../core/metrics.js';
-import { agentColor, agentLogo, agentTile, filterTiles, group, pill, row } from './ui.js';
+import { agentColor, agentLogo, filterTiles, group, pill, row } from './ui.js';
+import { renderFlocks } from './model-flocks.js';
 
 // Models tab: every agent on this computer and the models it can use, from
 // what the CLI lists, the user's CLI settings, local history and IDs typed into
@@ -71,10 +72,42 @@ function renderGraph(agent, models, usage) {
   return root;
 }
 
-export function initModels({ getRuntime, getModels, getCustomModels, fetchMetrics, native }) {
+export function initModels({ getRuntime, getModels, getCustomModels, fetchMetrics, native, onChat = null }) {
   const view = $('#models-content');
   const cache = new Map();
   let usage = new Map(), seen = new Map(), selected = '', loading = null;
+  let mode = 'flocks';
+  try { if (localStorage.getItem('noai.modelsView') === 'graph') mode = 'graph'; } catch { /* storage unavailable */ }
+
+  // Flocks (every agent at once) or Graph (one agent at a time), remembered per computer.
+  function viewSwitch() {
+    const box = element('div', 'segmented-options models-view-switch');
+    box.setAttribute('role', 'radiogroup');
+    box.setAttribute('aria-label', 'Models view');
+    for (const [id, text] of [['flocks', 'Flocks'], ['graph', 'Graph']]) {
+      const label = element('label');
+      const input = element('input');
+      input.type = 'radio'; input.name = 'models-view'; input.value = id; input.checked = mode === id;
+      input.addEventListener('change', () => {
+        mode = id;
+        try { localStorage.setItem('noai.modelsView', id); } catch { /* storage unavailable */ }
+        render();
+      });
+      label.append(input, element('span', '', text));
+      box.append(label);
+    }
+    return box;
+  }
+
+  function renderSky(agents) {
+    const flocks = agents.map(agent => {
+      const label = getHarness(agent.id)?.label || agent.label || agent.id;
+      const models = modelsFor(agent.id).map(model => ({ ...model, used: usage.get(`${agent.id}:${model.id}`) || 0 }));
+      return { agent: { id: agent.id, label, version: agent.version || '', path: agent.path || '' }, models };
+    });
+    const reducedMotion = document.documentElement.dataset.motion === 'reduce' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return renderFlocks(flocks, { reducedMotion, onChat });
+  }
 
   const installed = () => (getRuntime()?.harnesses || []).filter(item => item.installed);
 
@@ -125,7 +158,6 @@ export function initModels({ getRuntime, getModels, getCustomModels, fetchMetric
 
   function render() {
     const agents = installed();
-    const missing = (getRuntime()?.harnesses || []).filter(item => !item.installed);
     if (!native || !agents.length) {
       const empty = element('div', 'scheduled-empty-state');
       empty.append(element('h3', '', native ? 'No agents found' : 'Open the desktop app'), element('p', '', native ? 'Install Claude Code, Codex or another supported agent CLI and sign in, then refresh.' : 'Models are read from the agents installed on this computer.'));
@@ -134,6 +166,12 @@ export function initModels({ getRuntime, getModels, getCustomModels, fetchMetric
     }
     if (!agents.some(agent => agent.id === selected)) selected = agents[0].id;
     const fragment = document.createDocumentFragment();
+    fragment.append(viewSwitch());
+    if (mode === 'flocks') {
+      fragment.append(renderSky(agents));
+      view.replaceChildren(fragment);
+      return;
+    }
     fragment.append(filterTiles(agents.map(agent => ({ id: agent.id, label: getHarness(agent.id)?.label || agent.label || agent.id, count: modelsFor(agent.id).length, icon: (agent.label || agent.id).slice(0, 1).toUpperCase(), color: agentColor(agent.id), agent: agent.id })), selected, id => { selected = id; render(); }, 'models-agents'));
 
     const agent = agents.find(item => item.id === selected);
@@ -161,9 +199,6 @@ export function initModels({ getRuntime, getModels, getCustomModels, fetchMetric
     if (rows.length) fragment.append(group(`${label} models`, rows));
     const details = [agent.version ? `Version ${agent.version}` : '', agent.path || ''].filter(Boolean).join(' · ');
     if (details) fragment.append(element('p', 'ui-footnote', details));
-    if (missing.length) {
-      fragment.append(group('Not installed', missing.map(item => row({ leading: agentTile(item.id, getHarness(item.id)?.label || item.label, 'is-muted'), title: getHarness(item.id)?.label || item.label || item.id, subtitle: 'Install and sign in to its CLI to use it in Noai', trailing: [pill('Not found')] }))));
-    }
     view.replaceChildren(fragment);
   }
 

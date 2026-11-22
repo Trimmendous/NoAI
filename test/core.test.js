@@ -117,6 +117,11 @@ test('appearance is applied and cached for immediate startup', () => {
     assert.equal(applyTheme().palette, 'blue');
     values.set('noai.appearance', JSON.stringify({ theme: 'light', palette: 'graphite', v: 2 }));
     assert.equal(applyTheme().palette, 'graphite');
+    // Matrix is a dark theme with its own skin; leaving it removes the skin.
+    assert.equal(applyTheme({ theme: 'matrix' }).resolvedTheme, 'dark');
+    assert.equal(root.dataset.skin, 'matrix');
+    applyTheme({ theme: 'light' });
+    assert.equal(root.dataset.skin, undefined);
   } finally {
     if (beforeDocument === undefined) delete globalThis.document;
     else globalThis.document = beforeDocument;

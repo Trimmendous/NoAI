@@ -21,7 +21,6 @@ try {
   await page.locator('input[name="palette"][value="blue"]').check();
   assert.equal(await page.locator('html').getAttribute('data-palette'), 'blue');
   await page.locator('input[name="theme"][value="dark"]').check();
-  await page.locator('#settings-close').click();
   assert.equal(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--canvas').trim()), '#111112');
   await page.screenshot({ path: '/tmp/noai-check/dark.png', fullPage: true });
   await page.waitForTimeout(350);
@@ -29,10 +28,9 @@ try {
   await page.locator('#runtime-label').filter({ hasText: 'Desktop preview' }).waitFor();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
   assert.equal(await page.locator('html').getAttribute('data-palette'), 'blue');
-  await page.locator('#theme-toggle').click();
+  await page.locator('#header-settings').click(); await page.locator('#theme-options input[value="light"]').check();
   await page.locator('#open-settings').click();
   await page.locator('input[name="palette"][value="sage"]').check();
-  await page.locator('#settings-close').click();
   await page.screenshot({ path: '/tmp/noai-check/light.png', fullPage: true });
   await page.locator('button[data-view="accounts"]').click();
   assert.equal(await page.locator('.account-card').count(), 6);
@@ -73,8 +71,9 @@ try {
         }
         if (command === 'edit_scheduled_task') {
           const task = window.testTasks.find(task => task.id === args.id);
-          if (task.status !== 'scheduled' || (task.lastRunId || null) !== args.expectedLastRunId) throw new Error('This job has already started or changed.');
-          Object.assign(task, args.input, {nextRunAt:args.input.startAt}); window.testSaveTasks(); return task;
+          if (['cancelled', 'completed'].includes(task.status)) throw new Error('This job has ended.');
+          const timed = ['scheduled', 'paused'].includes(task.status) && (task.lastRunId || null) === args.expectedLastRunId;
+          Object.assign(task, args.input, timed ? {nextRunAt:args.input.startAt} : {}); window.testSaveTasks(); return task;
         }
         if (command === 'retry_scheduled_task') {
           const task = window.testTasks.find(task => task.id === args.id);
@@ -284,10 +283,10 @@ try {
   assert.equal(await chat.evaluate(() => window.testTasks.find(task => task.title === 'Tomorrow one time').prompt), 'Edited one-off prompt');
   await chat.locator('#job-content').getByRole('button', {name:'Edit', exact:true}).click();
   assert.equal(await chat.locator('#scheduled-permissions').inputValue(), 'workspace-write');
-  await chat.locator('#scheduled-prompt').fill('Must not save after starting');
-  await chat.evaluate(() => { window.testTasks.find(task => task.title === 'Tomorrow one time').status = 'running'; });
+  await chat.locator('#scheduled-prompt').fill('Must not save after it ends');
+  await chat.evaluate(() => { window.testTasks.find(task => task.title === 'Tomorrow one time').status = 'completed'; });
   await chat.locator('#scheduled-submit').click();
-  await chat.locator('#scheduled-form-status').filter({hasText:'Editing is closed'}).waitFor();
+  await chat.locator('#scheduled-form-status').filter({hasText:'has ended'}).waitFor();
   assert.equal(await chat.locator('#scheduled-submit').isDisabled(), true);
   assert.equal(await chat.evaluate(() => window.testTasks.find(task => task.title === 'Tomorrow one time').prompt), 'Edited one-off prompt');
   await chat.locator('#scheduled-edit-cancel').click();
@@ -406,7 +405,7 @@ try {
   await chat.locator('#open-settings').click();
   await chat.locator('input[name="theme"][value="dark"]').check();
   await chat.locator('input[name="palette"][value="graphite"]').check();
-  await chat.locator('#settings-close').click();
+  await chat.locator('button.nav-item[data-view="jobs"]').click();
   await chat.locator('.main-content').evaluate(node => { node.scrollTop = 0; });
   await chat.screenshot({path:'/tmp/noai-check/jobs-dark.png',fullPage:true});
   await chat.setViewportSize({width:390,height:844});

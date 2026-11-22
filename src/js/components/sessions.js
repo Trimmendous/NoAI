@@ -3,6 +3,7 @@ import { renderMarkdown } from './markdown.js';
 import { getHarness } from '../core/catalog.js';
 import { normalizeMetrics } from '../core/metrics.js';
 import { renderSessionStats } from './session-stats.js';
+import { renderItemAnalytics } from './item-analytics.js';
 import { agentColor, agentTile, filterTiles, relativeTime, row } from './ui.js';
 
 const $ = selector => document.querySelector(selector);
@@ -59,7 +60,23 @@ export function combineSessions(local, conversations) {
 export function initSessions({list, detail, getConversations, fetchMetrics, navigate, native}) {
   let sessions = [], page = 0, selected = null, generation = 0, loading = null, listScroll = 0;
   const body = $('#sessions-body'), search = $('#sessions-search'), sort = $('#sessions-sort');
+  const modelSelect = $('#sessions-model'), folderSelect = $('#sessions-folder'), periodSelect = $('#sessions-period');
   let agent = '';
+  // Sort and filters are remembered on this device.
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('noai.sessionsView') || '{}') || {}; } catch { return {}; } })();
+  if ([...sort.options].some(option => option.value === saved.sort)) sort.value = saved.sort;
+  if ([...periodSelect.options].some(option => option.value === saved.period)) periodSelect.value = saved.period;
+  let wantedModel = saved.model || '', wantedFolder = saved.folder || '';
+  const remember = () => { try { localStorage.setItem('noai.sessionsView', JSON.stringify({ sort: sort.value, period: periodSelect.value, model: modelSelect.value, folder: folderSelect.value })); } catch { /* not kept */ } };
+  /** Fills a filter menu from the sessions on hand, with a count for each choice. */
+  function fillOptions(select, allLabel, values, label = value => value) {
+    const wanted = select.value || (select === modelSelect ? wantedModel : wantedFolder);
+    const counts = new Map();
+    for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+    const options = [...counts].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+    select.replaceChildren(new Option(allLabel, ''), ...options.map(([value, count]) => { const option = new Option(`${label(value)} (${count})`, value); option.title = value; return option; }));
+    select.value = counts.has(wanted) ? wanted : '';
+  }
   // Filter tiles: all sessions, then one per agent that has any.
   function renderAgentFilter() {
     const counts = new Map();
@@ -72,12 +89,25 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
   function render() {
     renderAgentFilter();
     const query = search.value.trim().toLowerCase();
-    const filtered = sessions.filter(session => (!agent || session.harness === agent) && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
+    const inAgent = sessions.filter(session => !agent || session.harness === agent);
+    fillOptions(modelSelect, 'All models', inAgent.map(session => session.model || ''), value => value || 'Default model');
+    fillOptions(folderSelect, 'All folders', inAgent.map(session => session.projectPath || ''), value => value ? basename(value) : 'No folder');
+    const days = Number(periodSelect.value) || 0;
+    const since = days ? (() => { const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (days - 1)); return start.getTime() / 1000; })() : 0;
+    const model = modelSelect.value, folder = folderSelect.value;
+    const filtered = inAgent.filter(session => (!modelSelect.selectedIndex || (session.model || '') === model)
+      && (!folderSelect.selectedIndex || (session.projectPath || '') === folder)
+      && (!since || session.updatedAt >= since)
+      && (!query || [session.title,session.projectPath,session.model,session.sessionId].some(value => value?.toLowerCase().includes(query))));
+    $('#sessions-clear').hidden = !(modelSelect.selectedIndex || folderSelect.selectedIndex || days || query || agent);
     const order = {
       title:(a,b) => a.title.localeCompare(b.title),
       oldest:(a,b) => a.updatedAt-b.updatedAt,
       tokens:(a,b) => (sessionTokens(b)?.total ?? -1)-(sessionTokens(a)?.total ?? -1) || b.updatedAt-a.updatedAt,
       context:(a,b) => (contextPercent(b) ?? -1)-(contextPercent(a) ?? -1) || b.updatedAt-a.updatedAt,
+      'fewest-tokens':(a,b) => (sessionTokens(a)?.total ?? Infinity)-(sessionTokens(b)?.total ?? Infinity) || b.updatedAt-a.updatedAt,
+      messages:(a,b) => (b.messageCount || 0)-(a.messageCount || 0) || b.updatedAt-a.updatedAt,
+      duration:(a,b) => ((b.updatedAt-(b.startedAt || b.updatedAt)) - (a.updatedAt-(a.startedAt || a.updatedAt))) || b.updatedAt-a.updatedAt,
     }[sort.value] || ((a,b) => b.updatedAt-a.updatedAt);
     filtered.sort(order);
     const pages = Math.max(1, Math.ceil(filtered.length/PAGE_SIZE)); page = Math.min(page, pages-1);
@@ -143,6 +173,7 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
           const rows = normalizeMetrics(data.records || []).filter(row => !session.conversation || runIds.has(row.runId) || row.harness === session.harness && row.sessionId === session.sessionId).map(row => ({...row, runId:session.id}));
           const run = {runId:session.id, historyAvailable:false, elapsedLabel:'Session span', startedAt:session.startedAt, finishedAt:session.updatedAt, events:[]};
           renderSessionStats($('#session-statistics'), session, run, rows, 'Recorded usage for this session.');
+          renderItemAnalytics($('#session-analytics'), rows, { what: 'this session' });
         }
         if(!offset) {
           const prompt=data.messages.find(message=>message.role==='user'&&message.text);
@@ -176,7 +207,15 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
   $('#session-refresh').addEventListener('click', () => { if (selected) void open(selected, false); });
   $('#sessions-refresh').addEventListener('click', () => void refresh());
   search.addEventListener('input', () => { page = 0; render(); });
-  sort.addEventListener('change', () => { page = 0; render(); });
+  sort.addEventListener('change', () => { page = 0; remember(); render(); });
+  for (const select of [modelSelect, folderSelect, periodSelect]) select.addEventListener('change', () => {
+    wantedModel = modelSelect.value; wantedFolder = folderSelect.value;
+    page = 0; remember(); render();
+  });
+  $('#sessions-clear').addEventListener('click', () => {
+    agent = ''; search.value = ''; modelSelect.value = ''; folderSelect.value = ''; periodSelect.value = '';
+    wantedModel = ''; wantedFolder = ''; page = 0; remember(); render();
+  });
   $('#sessions-previous').addEventListener('click', () => { page--; render(); });
   $('#sessions-next').addEventListener('click', () => { page++; render(); });
   async function route() {
