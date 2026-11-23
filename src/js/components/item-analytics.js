@@ -4,6 +4,7 @@ import { renderUsageChart } from './usage-chart.js';
 import { renderOutcomesChart } from './outcomes-chart.js';
 import { summarizeMetrics, outcomeTotals } from '../core/metrics.js';
 import { getHarness } from '../core/catalog.js';
+import { renderSubagents } from './subagents.js';
 
 // The Dashboard's charts and numbers for one job or one session: the same
 // tiles, usage chart, calls-and-errors chart, tools and models, drawn from
@@ -112,5 +113,7 @@ export function renderItemAnalytics(container, rows, { what = 'this item' } = {}
   models.append(list);
   breakdown.append(tools, models);
 
-  container.replaceChildren(head, tiles, usage, calls, breakdown);
+  const subagents = element('section', 'metrics-tools-section metrics-subagents');
+  renderSubagents(subagents, rows, { range: settings.range }, { heading: 'h4', what: settings.range === 'all' ? what : 'this time frame' });
+  container.replaceChildren(head, tiles, usage, calls, subagents, breakdown);
 }

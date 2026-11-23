@@ -16,6 +16,7 @@ mod runtime;
 mod scheduled_tasks;
 mod scheduler;
 mod storage;
+mod summaries;
 mod worktrees;
 
 use tauri::Manager;
@@ -86,6 +87,7 @@ pub fn run() {
             runtime::set_automation,
             runtime::list_changes,
             runtime::change_diff,
+            runtime::read_summary,
             runtime::review_change,
             runtime::list_plugins,
             runtime::set_plugin_enabled,

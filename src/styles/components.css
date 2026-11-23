@@ -312,3 +312,22 @@ select.text-field, select.ui-popup, .scheduled-field select, .metrics-controls s
 .composer-toolbar { flex-wrap: wrap; row-gap: 6px; }
 .composer-selects { flex: 1 1 auto; flex-wrap: wrap; }
 .composer-actions { margin-left: auto; }
+
+/* Help: articles beside a topic list, like Settings. */
+.help-search { margin: 0 0 18px; max-width: 520px; }
+.help-body { padding: 4px 24px 24px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--card-shadow); }
+.help-body .markdown h3 { font-size: 22px; margin: 18px 0 10px; }
+.help-body .markdown h4 { margin-top: 22px; font-size: 15px; }
+.help-body .markdown p, .help-body .markdown li { line-height: 1.6; }
+.help-results { display: grid; gap: 8px; }
+.help-results[hidden], .help-body[hidden] { display: none; }
+.help-result { display: grid; gap: 3px; padding: 12px 16px; border: 0; border-radius: var(--radius-md); color: var(--ink); background: var(--surface); box-shadow: var(--card-shadow); text-align: left; }
+.help-result:hover { background: var(--surface-subtle); }
+.help-result strong { font-size: 13.5px; }
+.help-result span { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+
+.job-summary-log { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--card-shadow); cursor: pointer; }
+.job-summary-log input { margin-top: 3px; }
+.job-summary-log span { display: grid; gap: 3px; }
+.job-summary-log strong { font-size: 13.5px; font-weight: 600; }
+.job-summary-log small { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }

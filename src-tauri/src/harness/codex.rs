@@ -279,6 +279,18 @@ impl Harness for Codex {
                 if let Some(id) = p["id"].as_str() {
                     s.session = id.into();
                 }
+                // A thread Codex started for a subagent says so in its source.
+                let spawned = &p["source"]["subagent"];
+                if !spawned.is_null() {
+                    s.subagent = Some(
+                        p["agent_role"]
+                            .as_str()
+                            .or_else(|| spawned["thread_spawn"]["agent_role"].as_str())
+                            .or_else(|| spawned.as_str())
+                            .unwrap_or("subagent")
+                            .to_string(),
+                    );
+                }
                 return;
             }
             "turn_context" => {
@@ -325,6 +337,13 @@ impl Harness for Codex {
             )
         {
             if let Some(call) = p["call_id"].as_str() {
+                let failed = tool_failed(&p["output"]);
+                if let Some(launch) = s
+                    .rows
+                    .get_mut(&format!("local:codex:{}:subagent:{call}", s.session))
+                {
+                    launch["status"] = json!(if failed { "failed" } else { "background" });
+                }
                 let id = format!("local:codex:{}:result:{call}", s.session);
                 let mut r = row(&id, harness, &s.session, &s.model, at, "outcome");
                 r["outcome"] = json!(if tool_failed(&p["output"]) {
@@ -378,6 +397,19 @@ impl Harness for Codex {
                 let id = format!("local:codex:{}:tool:{call}", s.session);
                 let mut r = row(&id, harness, &s.session, &s.model, at, "activity");
                 r["tool"] = p["name"].clone();
+                if p["name"] == "spawn_agent" {
+                    let input: Value = p["arguments"]
+                        .as_str()
+                        .and_then(|text| serde_json::from_str(text).ok())
+                        .unwrap_or_default();
+                    let id = format!("local:codex:{}:subagent:{call}", s.session);
+                    let mut launch = row(&id, harness, &s.session, &s.model, at, "subagent");
+                    launch["subagentType"] = json!(input["agent_type"]
+                        .as_str()
+                        .or_else(|| input["role"].as_str())
+                        .unwrap_or("subagent"));
+                    s.rows.insert(id, launch);
+                }
                 s.rows.insert(id, r);
             }
         }

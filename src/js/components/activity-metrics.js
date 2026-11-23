@@ -2,6 +2,8 @@ import { icon } from './ui.js';
 import { renderUsageChart } from './usage-chart.js';
 import { renderOutcomesChart } from './outcomes-chart.js';
 import { element } from './dom.js';
+import { streakCard } from './streak.js';
+import { renderSubagents } from './subagents.js';
 import { normalizeMetrics, summarizeMetrics, summarizeJobRuns } from '../core/metrics.js';
 import { getHarness } from '../core/catalog.js';
 const $ = selector=>document.querySelector(selector);
@@ -22,7 +24,7 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
     model.value=models.includes(selectedModel)?selectedModel:'';
   }
   function render() {
-    for(const node of document.querySelectorAll('#view-home .metrics-totals, #view-home .metrics-insights, #view-home .metrics-job-summary, #view-home .metrics-figure, #view-home .metrics-tools-section, #view-home .metrics-daily-section, #view-home .metrics-table-wrap'))node.hidden=!hasData;
+    for(const node of document.querySelectorAll('#view-home .metrics-totals, #view-home .metrics-insights, #view-home .metrics-job-summary, #view-home .metrics-figure, #view-home .metrics-tools-section, #view-home .metrics-subagents, #view-home .metrics-daily-section, #view-home .metrics-table-wrap'))node.hidden=!hasData;
     const filters={harness:harness.value,model:model.value,range:range.value};
     const report=summarizeMetrics(rows,filters);
     const jobs=summarizeJobRuns(jobRuns,filters);
@@ -35,9 +37,12 @@ export function initActivityMetrics({fetchMetrics, fetchJobRuns, native}) {
       ['Cost',report.cost===null?'—':`$${report.cost.toLocaleString(undefined,{maximumFractionDigits:2})}`,report.cost===null?'Not reported by your agents':`${report.costReports} / ${report.usageReports} reports priced · USD`,'coin','var(--tile-accounts)',''],
       ['Sessions',number(report.runs),'Agent sessions and Noai runs','chat','var(--tile-jobs)','']
     ]) {const card=element('div','ui-filter ui-stat metrics-stat');card.style.setProperty('--filter',color);const top=element('span','ui-filter-top'),mark=element('span','ui-filter-icon');mark.append(icon(kind));const strong=element('strong','metrics-stat-value',value);if(title)strong.title=title;top.append(mark,strong);card.append(top,element('span','ui-filter-label metric-label',label),element('small','',note));cards.append(card);}
+    // The streak ignores the period: it is about consecutive days up to today.
+    cards.append(streakCard(rows.filter(row=>(!harness.value||row.harness===harness.value)&&(!model.value||(row.model||'__default__')===model.value)).map(row=>row.at)));
     const usageReport=report;
     renderUsageChart($('#metrics-chart'),usageReport,{metric:metric.value,style:style.value});
     renderOutcomesChart($('#metrics-outcomes'),report,{style:$('#metrics-outcomes-style').value});
+    renderSubagents($('#metrics-subagents'),rows,filters,{what:'this period'});
     const insights=$('#metrics-insights');insights.replaceChildren();
     for(const [label,group] of [['Most-used model',report.models[0]],['Most-used harness',report.harnesses[0]]]) {
       const card=element('div','insight-card');

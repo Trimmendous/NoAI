@@ -148,5 +148,6 @@ export async function getAutomation() { return isNative() ? invoke('get_automati
 export async function setAutomation(input) { return invoke('set_automation', { input }); }
 export async function listChanges() { return isNative() ? invoke('list_changes') : []; }
 export async function changeDiff(runId) { return invoke('change_diff', { runId }); }
+export async function readSummary(dirs) { return isNative() ? invoke('read_summary', { dirs }) : null; }
 export async function reviewChange(runId, action) { return invoke('review_change', { runId, action }); }
 export async function runDigestNow() { return invoke('run_digest_now'); }

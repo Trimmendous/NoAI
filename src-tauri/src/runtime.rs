@@ -211,6 +211,12 @@ pub async fn change_diff(app: AppHandle, run_id: String) -> Result<String, Strin
     off_main(move || ipc::request(&app, json!({"command":"change_diff", "run_id":run_id}))).await
 }
 
+/// SUMMARY.md (or summary.md, README.md, readme.md) from the first of `dirs` that has one.
+#[tauri::command]
+pub async fn read_summary(dirs: Vec<String>) -> Result<Option<crate::summaries::Summary>, String> {
+    off_main(move || Ok(crate::summaries::find(&dirs))).await
+}
+
 /// "merge", "publish" or "discard". Publishing pushes the branch, so it can take a while.
 #[tauri::command]
 pub async fn review_change(

@@ -1,4 +1,5 @@
 import { parseLocalTime } from '../core/schedule-time.js';
+import { summaryCard, runFolders } from './summary.js';
 import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel } from '../core/catalog.js';
 import { basename, element } from './dom.js';
 import { renderMarkdown } from './markdown.js';
@@ -549,6 +550,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
         if (stats.isConnected) renderSessionStats(stats, task, run, metrics);
       }).catch(() => { if (stats.isConnected) renderSessionStats(stats, task, run, [], 'Metrics unavailable; showing saved run data.'); });
       if (run.result) content.append(element('p', 'scheduled-run-result', run.result));
+      // Re-read once the run is over, in case it wrote its summary at the end.
+      content.append(summaryCard(runFolders(task, run), { refresh: !['running', 'waiting'].includes(run.status) && run.finishedAt > Date.now() / 1000 - 60 }));
       if (run.retryAt) content.append(element('p', 'scheduled-waiting', `Retry: ${formatScheduledTime(run.retryAt)}`));
     }
     const conversation = button('Open conversation', () => {

@@ -2,7 +2,7 @@
 .metrics-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
 .metrics-controls label { display: grid; flex: 1 1 130px; gap: 5px; color: var(--ink-soft); font-size: 12px; min-width: 0; }
 .metrics-controls select { width: 100%; min-width: 0; }
-.metrics-totals { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; }
+.metrics-totals { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 10px; }
 .metrics-stat { display: grid; align-content: start; min-width: 0; }
 .metrics-stat-value { overflow-wrap: anywhere; }
 .metrics-stat small { color: var(--ink-muted); font-size: 11px; }
@@ -65,3 +65,20 @@
 .chart-legend.is-toggles button:hover { background: var(--fill-hover); }
 .chart-legend.is-toggles button.is-off { color: var(--ink-muted); background: transparent; text-decoration: line-through; }
 .chart-legend.is-toggles button.is-off .swatch { opacity: .35; }
+
+/* Subagents: tiles, then one row per subagent type. */
+.metrics-subagents .subagents-title { margin: 0 0 12px; }
+.metrics-subagents .subagents-tiles { margin-bottom: 14px; }
+.subagents-types { display: grid; gap: 4px; }
+.subagents-type { display: grid; grid-template-columns: minmax(140px, 1fr) auto; grid-template-areas: "name facts" "meter meter"; gap: 6px 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.subagents-type:first-child { border-top: 0; }
+.subagents-type-name { grid-area: name; display: grid; gap: 2px; min-width: 0; }
+.subagents-type-name strong { font-size: 13.5px; }
+.subagents-type-name span { color: var(--ink-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.subagents-type-facts { grid-area: facts; display: flex; flex-wrap: wrap; gap: 4px 18px; justify-content: flex-end; }
+.subagents-type-facts span { display: grid; gap: 1px; text-align: right; }
+.subagents-type-facts small { color: var(--ink-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.subagents-type-facts b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.subagents-type-facts b.is-bad { color: var(--bad, #ff3b30); }
+.subagents-type .metrics-tool-meter { grid-area: meter; width: 100%; }
+@media (max-width: 620px) { .subagents-type { grid-template-columns: 1fr; grid-template-areas: "name" "facts" "meter"; } .subagents-type-facts { justify-content: flex-start; } .subagents-type-facts span { text-align: left; } }

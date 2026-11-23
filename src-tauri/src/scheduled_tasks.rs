@@ -205,18 +205,62 @@ impl Default for AutomationSettings {
 
 /// The user's standing instructions, added to every run of every job of
 /// that kind (the digest has its own). Each run saves the full prompt it was sent.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobInstructions {
     #[serde(default)]
     pub recurring: String,
     #[serde(default)]
     pub one_time: String,
+    /// Recurring jobs keep a SUMMARY.md log: a table with one row per run,
+    /// then a short section per run. On unless turned off.
+    #[serde(default = "default_true")]
+    pub summary_log: bool,
+}
+
+impl Default for JobInstructions {
+    fn default() -> Self {
+        Self {
+            recurring: String::new(),
+            one_time: String::new(),
+            summary_log: true,
+        }
+    }
 }
 
 const MAX_INSTRUCTIONS: usize = 4000;
 
-fn with_instructions(instructions: &JobInstructions, task: &Task) -> String {
+/// The SUMMARY.md log instructions for run number `run` of a recurring job.
+fn summary_log(task: &Task, run: usize, date: &str) -> String {
+    include_str!("summary-log.md")
+        .trim()
+        .replace("{run}", &run.to_string())
+        .replace("{date}", date)
+        .replace("{title}", task.title.trim())
+}
+
+fn with_instructions(
+    instructions: &JobInstructions,
+    task: &Task,
+    run: usize,
+    date: &str,
+) -> String {
+    let prompt = with_standing(instructions, task);
+    if task.interval_seconds.is_some() && instructions.summary_log {
+        format!(
+            "{prompt}
+
+--- Summary log ---
+
+{}",
+            summary_log(task, run, date)
+        )
+    } else {
+        prompt
+    }
+}
+
+fn with_standing(instructions: &JobInstructions, task: &Task) -> String {
     let global = if task.interval_seconds.is_some() {
         &instructions.recurring
     } else {
@@ -677,6 +721,7 @@ impl ScheduledTasks {
         let clean = JobInstructions {
             recurring: input.recurring.trim().to_owned(),
             one_time: input.one_time.trim().to_owned(),
+            summary_log: input.summary_log,
         };
         if clean.recurring.chars().count() > MAX_INSTRUCTIONS
             || clean.one_time.chars().count() > MAX_INSTRUCTIONS
@@ -861,6 +906,12 @@ impl ScheduledTasks {
         self.update(|journal| {
             let mut claims = Vec::new();
             let instructions = journal.instructions.clone();
+            // Runs are numbered per job, as the Jobs page shows them.
+            let mut run_counts: std::collections::HashMap<String, usize> = Default::default();
+            for run in &journal.runs {
+                *run_counts.entry(run.task_id.clone()).or_default() += 1;
+            }
+            let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
             for task in &mut journal.tasks {
                 if task.status != "scheduled" || task.next_run_at.is_none_or(|due| due > at) {
                     continue;
@@ -869,7 +920,7 @@ impl ScheduledTasks {
                 let run_id = unique_id("scheduled-run");
                 let conversation_id = unique_id("scheduled-conversation");
                 let resume_id = task.pending_resume_id.take();
-                let base = if is_digest(task) { task.prompt.clone() } else { with_instructions(&instructions, task) };
+                let base = if is_digest(task) { task.prompt.clone() } else { with_instructions(&instructions, task, run_counts.get(&task.id).copied().unwrap_or(0) + 1, &date) };
                 let prompt = if resume_id.is_some() {
                     format!("Continue this interrupted job. Inspect what is already completed, preserve existing work, and do not repeat completed actions. Original job instructions:\n\n{base}")
                 } else { base };
@@ -1067,7 +1118,7 @@ mod tests {
         );
         store.resume(&task.id).unwrap();
         let claimed = store.claim_due(now() + 7200).unwrap();
-        assert_eq!(claimed[0].1.prompt, "new");
+        assert!(claimed[0].1.prompt.starts_with("new\n\n--- Summary log ---"));
         let run_id = claimed[0].0.last_run_id.clone();
         let edited = store
             .edit(&task.id, input("newer", 60), run_id.clone())
@@ -1113,12 +1164,14 @@ mod tests {
             .set_instructions(JobInstructions {
                 recurring: " Be brief. ".into(),
                 one_time: String::new(),
+                summary_log: true,
             })
             .unwrap();
         assert!(store
             .set_instructions(JobInstructions {
                 recurring: "x".repeat(4001),
-                one_time: String::new()
+                one_time: String::new(),
+                summary_log: true,
             })
             .is_err());
         let claims = store.claim_due(now() + 1).unwrap();
@@ -1131,7 +1184,18 @@ mod tests {
                 .prompt
                 .clone()
         };
-        assert!(prompt(true).contains("Be brief.") && prompt(true).ends_with("Do the thing"));
+        // Recurring: standing instructions, the job, then the SUMMARY.md log for run #1.
+        let recurring = prompt(true);
+        assert!(
+            recurring.contains("Be brief.")
+                && recurring.contains("This job:\nDo the thing\n\n--- Summary log ---")
+        );
+        assert!(
+            recurring.contains("SUMMARY.md")
+                && recurring.contains("run #1 of the job")
+                && recurring.contains("# Job")
+                && !recurring.contains("{run}")
+        );
         assert_eq!(prompt(false), "Do the thing");
         drop(store);
         assert_eq!(
@@ -1141,6 +1205,10 @@ mod tests {
                 .recurring,
             "Be brief."
         );
+        // Older saved settings have no switch: the log is on.
+        let old: JobInstructions =
+            serde_json::from_str(r#"{"recurring":"x","oneTime":""}"#).unwrap();
+        assert!(old.summary_log);
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -1369,7 +1437,7 @@ mod tests {
             request.permissions
         );
         assert_eq!(request.model.as_deref(), Some("test-model"));
-        assert_eq!(request.prompt, "New instructions");
+        assert!(request.prompt.starts_with("New instructions"));
         // A running job can be edited; the change applies from the next run.
         let running = store.edit(&task.id, changes.clone(), None).unwrap();
         assert_eq!(
@@ -1409,7 +1477,7 @@ mod tests {
             Some(request.run_id.as_str())
         );
         let history = store.runs(&task.id).unwrap();
-        assert_eq!(history[0].prompt.as_deref(), Some("New instructions"));
+        assert!(history[0].prompt.as_deref().unwrap().starts_with("New instructions"));
         assert_eq!(history[0].harness.as_deref(), Some("claude"));
         assert_eq!(history[0].model.as_deref(), Some("test-model"));
         drop(store);

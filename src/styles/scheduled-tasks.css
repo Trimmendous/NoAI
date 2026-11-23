@@ -140,3 +140,12 @@
 #scheduled-list > .scheduled-group:last-child .scheduled-card-meta { padding: 0; }
 
 .job-detail-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+
+/* SUMMARY.md / README.md from the folder a run or session worked in. */
+.run-summary { margin: 16px 0; padding: 0 20px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--card-shadow); }
+.run-summary[hidden] { display: none; }
+.run-summary-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 14px 0; cursor: pointer; }
+.run-summary-head strong { font-size: 13.5px; }
+.run-summary-head span { min-width: 0; color: var(--ink-muted); font-size: 12px; overflow-wrap: anywhere; }
+.run-summary[open] .run-summary-head { border-bottom: 1px solid var(--line); }
+.run-summary-body { padding: 4px 0 16px; line-height: 1.6; overflow-wrap: anywhere; }

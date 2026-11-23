@@ -247,6 +247,20 @@ impl Harness for Claude {
         Some(folder.parent()?.with_extension("jsonl"))
     }
 
+    fn subagent_type(&self, path: &Path) -> Option<String> {
+        self.subagent_parent(path)?;
+        // agent-<id>.meta.json beside the transcript names the subagent's type.
+        let meta = std::fs::read(path.with_extension("meta.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        Some(
+            meta.as_ref()
+                .and_then(|meta| meta["agentType"].as_str())
+                .unwrap_or("general-purpose")
+                .to_string(),
+        )
+    }
+
     fn metrics_line(&self, v: &Value, s: &mut FileState) {
         let harness = self.id();
         match v["type"].as_str() {
@@ -289,6 +303,18 @@ impl Harness for Claude {
                         let mut r = row(&id, harness, session, model, at, "activity");
                         r["tool"] = block["name"].clone();
                         s.rows.insert(id, r);
+                        // Agent (once called Task) starts a subagent: one launch row.
+                        if matches!(block["name"].as_str(), Some("Agent" | "Task")) {
+                            let id = format!("local:claude:subagent:{tool}");
+                            let mut r = row(&id, harness, session, model, at, "subagent");
+                            r["subagentType"] = json!(block["input"]["subagent_type"]
+                                .as_str()
+                                .unwrap_or("general-purpose"));
+                            if let Some(chosen) = block["input"]["model"].as_str() {
+                                r["subagentModel"] = json!(chosen);
+                            }
+                            s.rows.insert(id, r);
+                        }
                     }
                 }
             }
@@ -317,6 +343,29 @@ fn outcome_rows(harness: &str, v: &Value, s: &mut FileState) {
         let Some(call) = block["tool_use_id"].as_str() else {
             continue;
         };
+        // The result of a subagent launch: how it ended, and what it used when it ran in the foreground.
+        if let Some(launch) = s.rows.get_mut(&format!("local:claude:subagent:{call}")) {
+            let result = &v["toolUseResult"];
+            launch["status"] = json!(if block["is_error"] == true {
+                "failed"
+            } else if result["status"] == "async_launched" {
+                "background"
+            } else {
+                "completed"
+            });
+            for (from, to) in [
+                ("totalDurationMs", "durationMs"),
+                ("totalTokens", "tokens"),
+                ("totalToolUseCount", "toolCalls"),
+            ] {
+                if let Some(value) = result[from].as_u64() {
+                    launch[to] = json!(value);
+                }
+            }
+            if let Some(model) = result["resolvedModel"].as_str() {
+                launch["subagentModel"] = json!(model);
+            }
+        }
         let id = format!("local:claude:result:{call}");
         let mut r = row(&id, harness, session, &s.model, at, "outcome");
         r["outcome"] = json!(if block["is_error"] == true {

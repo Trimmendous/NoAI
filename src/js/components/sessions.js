@@ -1,4 +1,5 @@
 import { element, basename } from './dom.js';
+import { summaryCard } from './summary.js';
 import { renderMarkdown } from './markdown.js';
 import { getHarness } from '../core/catalog.js';
 import { normalizeMetrics } from '../core/metrics.js';
@@ -160,6 +161,7 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
     $('#session-source').textContent = `${session.sessionId}\n${session.sourcePath || ''}`;
     $('#session-original-prompt').hidden=true;$('#session-original-prompt').open=false;
     $('#session-transcript').replaceChildren(); $('#session-statistics').replaceChildren();
+    $('#session-summary').replaceChildren(summaryCard(session.projectPath ? [session.projectPath] : [], { refresh: !push }));
     $('#session-load-more').hidden = true; $('#session-detail-status').textContent = 'Opening session…';
     $('.main-content').scrollTop = 0;
     const messages = session.conversation?.messages || [];

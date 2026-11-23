@@ -61,6 +61,7 @@
           <div class="topbar-actions">
             <button id="rename-chat" class="icon-button chat-action" type="button" aria-label="Rename conversation" title="Rename conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16 11-11 4 4L8 20H4v-4ZM13 7l4 4" /></svg></button>
             <button id="delete-chat" class="icon-button chat-action danger-action" type="button" aria-label="Delete conversation" title="Delete conversation" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg></button>
+            <button id="header-help" class="icon-button" type="button" aria-label="Help" title="Help (?)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6" /><path d="M12 17v.01" /></svg></button>
             <button id="header-settings" class="icon-button" type="button" aria-label="Settings" title="Settings" data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.07.08-1.85 1.85-.08-.07A1.7 1.7 0 0 0 16 18.4a1.7 1.7 0 0 0-1 1.56V20H9v-.04A1.7 1.7 0 0 0 8 18.4a1.7 1.7 0 0 0-1.88.34l-.08.07-1.85-1.85.07-.08A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.07-.08L6.04 5.2l.08.07A1.7 1.7 0 0 0 8 5.6 1.7 1.7 0 0 0 9 4.04V4h6v.04A1.7 1.7 0 0 0 16 5.6a1.7 1.7 0 0 0 1.88-.34l.08-.07 1.85 1.85-.07.08A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z" /></svg></button>
           </div>
         </header>
@@ -104,6 +105,16 @@
               </div>
             </section>
 
+            <section id="view-help" class="page-view settings-view help-view" aria-labelledby="help-title" hidden>
+              <button id="help-back" class="secondary-button settings-back" type="button" hidden>← Back</button>
+              <div class="page-heading page-heading-actions"><div><h2 id="help-title">Help</h2><p>How Noai works, and what to do when something isn’t right.</p></div><div class="page-actions"><button id="help-report" class="secondary-button" type="button">Report a problem</button></div></div>
+              <label class="search-field help-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><span class="sr-only">Search help</span><input id="help-search" type="search" placeholder="Search help" autocomplete="off" /></label>
+              <div class="settings-layout">
+                <nav id="help-nav" class="settings-nav" aria-label="Help topics"></nav>
+                <div class="settings-pane"><article id="help-article" class="help-body" aria-live="polite"></article><div id="help-results" class="help-results" hidden></div></div>
+              </div>
+            </section>
+
             <section id="view-settings" class="page-view settings-view" aria-labelledby="settings-title" hidden>
               <button id="settings-back" class="secondary-button settings-back" type="button" hidden>← Back</button>
               <div class="page-heading"><div><h2 id="settings-title">Settings</h2><p>How Noai looks and how your jobs run.</p></div></div>
@@ -120,6 +131,7 @@
                     <form id="job-instructions-form" class="job-instructions-group">
                       <div class="ui-group"><h4 class="ui-group-title"><label for="job-instructions-recurring">Recurring jobs</label></h4><div class="ui-list settings-card"><textarea id="job-instructions-recurring" class="job-instructions-field" rows="5" maxlength="4000" placeholder="For example: Commit nothing. Keep a short changelog in NOTES.md."></textarea></div></div>
                       <div class="ui-group"><h4 class="ui-group-title"><label for="job-instructions-one-time">One-time jobs</label></h4><div class="ui-list settings-card"><textarea id="job-instructions-one-time" class="job-instructions-field" rows="5" maxlength="4000" placeholder="For example: Explain what you changed in plain English at the end."></textarea></div></div>
+                      <label class="job-summary-log"><input id="job-instructions-summary-log" type="checkbox" checked /> <span><strong>Keep a SUMMARY.md log for recurring jobs</strong><small>Each run adds a row (run number, date, what was done in plain words) to a table in SUMMARY.md, then a short section with more detail. Shown at the top of each run in Noai.</small></span></label>
                       <div class="job-instructions-actions"><span id="job-instructions-status" class="field-help" role="status"></span><button id="job-instructions-save" class="primary-button" type="submit">Save instructions</button></div>
                     </form>
                   </section>
@@ -180,6 +192,7 @@
                 <figure class="metrics-figure"><div class="metrics-figure-head"><h3>Usage over time</h3><div class="metrics-figure-controls"><label><span class="sr-only">Show</span><select id="metrics-value" class="ui-popup"><option value="total">Tokens</option><option value="cost">Cost (USD)</option><option value="tools">Tool events</option></select></label><label><span class="sr-only">Chart type</span><select id="metrics-style" class="ui-popup"><option value="bar">Bar graph</option><option value="line">Line graph</option></select></label></div></div><div id="metrics-chart"></div><figcaption id="metrics-chart-caption"></figcaption></figure>
                 <figure class="metrics-figure metrics-outcomes-figure"><div class="metrics-figure-head"><h3>Calls and errors</h3><div class="metrics-figure-controls"><label><span class="sr-only">Calls and errors chart type</span><select id="metrics-outcomes-style" class="ui-popup"><option value="bar">Bar graph</option><option value="line">Line graph</option></select></label></div></div><div id="metrics-outcomes"></div><figcaption>Successful calls are model responses plus tool calls that worked. Tool failures happened on this computer; connection, rate-limit and API errors came from reaching the provider. Read from local agent history; Noai jobs are included once their agent records them.</figcaption></figure>
                 <details class="metrics-daily-section"><summary>Explore daily totals</summary><section aria-labelledby="metrics-daily-title"><h3 id="metrics-daily-title">Daily totals</h3><div class="metrics-table-wrap"><table class="metrics-table metrics-daily-table"><thead><tr><th scope="col">Date</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Cached input</th><th scope="col">Total tokens</th><th scope="col">Tool events</th></tr></thead><tbody id="metrics-daily"></tbody></table><p id="metrics-daily-empty" class="metrics-empty">No recorded activity for these filters.</p></div><p class="metrics-daily-note">Dates use your local time. Cached input is included in input and total tokens.</p></section></details>
+                <section id="metrics-subagents" class="metrics-tools-section metrics-subagents" aria-label="Subagents"></section>
                 <section class="metrics-tools-section" aria-label="Tool activity breakdown"><h3>Tool activity</h3><div id="metrics-tools" class="metrics-tools"></div></section>
                 <div class="metrics-table-wrap"><table class="metrics-table"><thead><tr><th scope="col">Harness</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Tool events</th><th scope="col">Sessions / runs</th></tr></thead><tbody id="metrics-breakdown"></tbody></table><p id="metrics-breakdown-empty" class="metrics-empty">No recorded activity for these filters.</p></div>
               </section>
@@ -212,6 +225,7 @@
               <div class="page-heading"><p id="session-agent" class="page-kicker"></p><h2 id="session-heading"></h2><p id="session-project"></p><p id="session-meta" class="session-meta"></p></div>
               <button id="session-open-conversation" class="primary-button" type="button">Open conversation</button>
               <details id="session-original-prompt" class="job-prompt" hidden><summary>Original recorded prompt</summary><p class="scheduled-card-instructions"></p></details>
+              <div id="session-summary"></div>
               <section id="session-statistics" class="session-stats" aria-label="Session stats"></section>
               <section id="session-analytics" class="item-analytics" aria-label="Session usage charts"></section>
               <details class="session-file"><summary>Session details</summary><p id="session-source"></p></details>

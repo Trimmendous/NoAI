@@ -263,8 +263,28 @@ fn detail(id: String, offset: usize) -> Result<Value, String> {
             messages.push(message);
         }
     }
+    // The session's own records, plus those of the subagents it started.
     let metrics = if offset == 0 {
-        crate::local_metrics::file_records(&entry.path, &entry.harness)?
+        let mut records = crate::local_metrics::file_records(&entry.path, &entry.harness)?;
+        let children: Vec<Entry> = INDEX
+            .get_or_init(Default::default)
+            .lock()
+            .map_err(|error| error.to_string())?
+            .values()
+            .filter(|child| {
+                child.harness == entry.harness
+                    && crate::harness::get(&child.harness)
+                        .and_then(|agent| agent.subagent_parent(&child.path))
+                        .is_some_and(|parent| parent == entry.path)
+            })
+            .cloned()
+            .collect();
+        for child in children {
+            records.extend(
+                crate::local_metrics::file_records(&child.path, &child.harness).unwrap_or_default(),
+            );
+        }
+        records
     } else {
         Vec::new()
     };

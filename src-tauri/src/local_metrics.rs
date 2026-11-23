@@ -23,6 +23,10 @@ pub struct FileState {
     pub(crate) model: String,
     pub(crate) totals: [u64; 3],
     pub(crate) rows: BTreeMap<String, Value>,
+    /// Set when this transcript is a subagent's: its type ("Explore", "web-fetch"…).
+    /// Every row from the file is tagged with it, so any agent's subagents add up the same way.
+    #[serde(default)]
+    pub(crate) subagent: Option<String>,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Cache {
@@ -49,9 +53,11 @@ pub fn start(dir: PathBuf, home: PathBuf) {
         })
         .clone();
     std::thread::spawn(move || {
-        // v2 added tool and API outcomes; rescan history once to pick them up.
-        let _ = fs::remove_file(dir.join("local-metrics-v1.json"));
-        let path = dir.join("local-metrics-v2.json");
+        // v3 tags subagent work; rescan history once to pick it up.
+        for old in ["local-metrics-v1.json", "local-metrics-v2.json"] {
+            let _ = fs::remove_file(dir.join(old));
+        }
+        let path = dir.join("local-metrics-v3.json");
         let mut cache: Cache = fs::read(&path)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
@@ -173,6 +179,9 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
     {
         *state = FileState::default();
     }
+    if state.subagent.is_none() {
+        state.subagent = crate::harness::get(harness).and_then(|agent| agent.subagent_type(path));
+    }
     let mut reader = BufReader::new(fs::File::open(path)?);
     reader.seek(SeekFrom::Start(state.offset))?;
     let mut line = String::new();
@@ -201,6 +210,16 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
             parse(harness, &value, state);
         } else {
             state.parse_errors += 1;
+        }
+    }
+    if let Some(kind) = state.subagent.clone() {
+        let agent = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        for row in state.rows.values_mut() {
+            row["subagent"] = json!(kind);
+            row["subagentId"] = json!(agent);
         }
     }
     state.len = meta.len();
@@ -383,6 +402,59 @@ mod tests {
         fs::write(&path, format!("{}\n", codex(20, 2))).unwrap();
         scan(&path, "codex", &mut state).unwrap();
         assert_eq!(state.rows.len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn subagents_are_counted_and_tagged() {
+        let root = std::env::temp_dir().join(format!("noai-subagents-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let folder = root.join("proj").join("sess").join("subagents");
+        fs::create_dir_all(&folder).unwrap();
+        let parent = root.join("proj").join("sess.jsonl");
+        let launch = json!({"type":"assistant","timestamp":"2026-11-01T10:00:00Z","sessionId":"sess","message":{"id":"m1","model":"opus","usage":{"input_tokens":5,"output_tokens":5},"content":[{"type":"tool_use","id":"call1","name":"Agent","input":{"subagent_type":"Explore","prompt":"secret"}}]}});
+        let result = json!({"type":"user","timestamp":"2026-11-01T10:01:00Z","sessionId":"sess","message":{"content":[{"type":"tool_result","tool_use_id":"call1"}]},"toolUseResult":{"status":"completed","totalDurationMs":60000,"totalTokens":900,"totalToolUseCount":4,"resolvedModel":"haiku"}});
+        fs::write(&parent, format!("{launch}\n{result}\n")).unwrap();
+        let mut state = FileState::default();
+        scan(&parent, "claude", &mut state).unwrap();
+        let spawn = &state.rows["local:claude:subagent:call1"];
+        assert_eq!(
+            (
+                spawn["subagentType"].as_str(),
+                spawn["status"].as_str(),
+                spawn["durationMs"].as_u64(),
+                spawn["tokens"].as_u64(),
+                spawn["subagentModel"].as_str()
+            ),
+            (
+                Some("Explore"),
+                Some("completed"),
+                Some(60000),
+                Some(900),
+                Some("haiku")
+            )
+        );
+        assert!(spawn.get("prompt").is_none() && !spawn.to_string().contains("secret"));
+
+        let child = folder.join("agent-abc.jsonl");
+        fs::write(
+            folder.join("agent-abc.meta.json"),
+            r#"{"agentType":"Explore"}"#,
+        )
+        .unwrap();
+        let work = json!({"type":"assistant","isSidechain":true,"timestamp":"2026-11-01T10:00:30Z","sessionId":"sess","message":{"id":"m2","model":"haiku","usage":{"input_tokens":100,"output_tokens":20}}});
+        fs::write(&child, format!("{work}\n")).unwrap();
+        let mut state = FileState::default();
+        scan(&child, "claude", &mut state).unwrap();
+        let usage = &state.rows["local:claude:m2"];
+        assert_eq!(
+            (
+                usage["subagent"].as_str(),
+                usage["subagentId"].as_str(),
+                usage["sessionId"].as_str()
+            ),
+            (Some("Explore"), Some("agent-abc"), Some("sess"))
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

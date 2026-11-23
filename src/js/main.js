@@ -21,7 +21,10 @@ import { initPalette } from './components/palette.js';
 import { initPlans } from './components/plans.js';
 import { relativeTime } from './components/ui.js';
 import { initChanges } from './components/changes.js';
-import { getAutomation, setAutomation, listChanges, changeDiff, reviewChange } from './services/bridge.js';
+import { setSummaryReader } from './components/summary.js';
+import { initHelp, sectionForView, HELP_SECTIONS } from './components/help.js';
+import { getAutomation, setAutomation, listChanges, changeDiff, reviewChange, readSummary } from './services/bridge.js';
+setSummaryReader(readSummary);
 import { setPluginThemes } from './core/theme.js';
 import { normalizeMetrics, summarizeMetrics, outcomeTotals } from './core/metrics.js';
 import { listPlugins, setPluginEnabled, createExamplePlugin, openPluginsFolder, deletePlugin } from './services/bridge.js';
@@ -139,7 +142,15 @@ function setSidebar(open) {
 // Where Settings was opened from, so its Back button returns to that exact
 // page: the same view, the same open job or session, and the same scroll.
 let settingsReturn = null;
+let helpReturn = null;
+let helpPanel = null;
 function setView(next) {
+  // Help remembers where it was opened from, like Settings, and opens on that page's article.
+  if (next === 'help' && view !== 'help') {
+    const heading = view === 'chat' ? '' : document.querySelector(`#view-${view} h2`)?.textContent.trim();
+    helpReturn = { view, hash: location.hash, title: heading || $('#main-title').textContent };
+    void helpPanel?.open(sectionForView(view));
+  }
   if (next === 'settings' && view !== 'settings') {
     // Name the page as it looks: an open job or session by its own heading.
     const heading = view === 'chat' ? '' : document.querySelector(`#view-${view} h2`)?.textContent.trim();
@@ -233,14 +244,14 @@ async function loadModels(harness) {
 function render() {
   const state = store.getState();
   const conversation = active();
-  for (const name of ['home', 'chat', 'changes', 'plugin', 'models', 'settings', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
+  for (const name of ['home', 'chat', 'help', 'changes', 'plugin', 'models', 'settings', 'accounts', 'activity', 'jobs', 'digest', 'sessions', 'session', 'job', 'job-conversation']) $(`#view-${name}`).hidden = name !== view;
   document.querySelectorAll('.nav-item[data-view]').forEach(button => {
     const selected = button.dataset.view === view || view === 'session' && button.dataset.view === 'sessions' || ['job', 'job-conversation'].includes(view) && button.dataset.view === 'jobs';
     button.classList.toggle('is-active', selected);
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  $('#main-title').textContent = view === 'changes' ? 'Changes' : view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
+  $('#main-title').textContent = view === 'help' ? 'Help' : view === 'changes' ? 'Changes' : view === 'plugin' ? pluginHost?.title() || 'Plugin' : view === 'home' ? 'Dashboard' : view === 'models' ? 'Models' : view === 'settings' ? 'Settings' : view === 'chat' ? conversation?.title || 'New chat' : view === 'accounts' ? 'Accounts' : ['jobs', 'job', 'job-conversation'].includes(view) ? 'Jobs' : view === 'digest' ? 'Daily digest' : view === 'sessions' ? 'Sessions' : view === 'session' ? 'Session' : 'Activity';
   // The chat box shows the folder this chat works in (or new chats will).
   const chatFolder = conversation ? conversation.projectPath : state.projectPath;
   $('#project-label').textContent = folderName(chatFolder);
@@ -272,6 +283,8 @@ function render() {
     renderActivity($('#activity-list'), state, activity);
     renderJobs($('#resume-list'), jobs, stopJob);
   }
+  $('#help-back').hidden = !helpReturn;
+  if (helpReturn) $('#help-back').textContent = `← Back to ${helpReturn.title || 'previous page'}`;
   $('#settings-back').hidden = !settingsReturn;
   if (settingsReturn) $('#settings-back').textContent = `← Back to ${settingsReturn.title || 'previous page'}`;
   theme.update(state.preferences);
@@ -681,6 +694,26 @@ document.addEventListener('keydown', event => {
   // ⌘D splits the current chat to the right, ⌘⇧D below it.
   if (event.key.toLowerCase() === 'd' && view === 'chat' && workspace) { event.preventDefault(); workspace.splitFocused(event.shiftKey ? 'bottom' : 'right'); }
 });
+// ---- Help ---------------------------------------------------------------------
+helpPanel = initHelp({ nav: $('#help-nav'), article: $('#help-article'), search: $('#help-search'), results: $('#help-results') });
+function leaveHelp() {
+  const back = helpReturn || { view: 'chat', hash: '' };
+  helpReturn = null;
+  if (back.hash !== location.hash) history.replaceState({}, '', back.hash || location.pathname);
+  setView(back.view);
+}
+$('#header-help').addEventListener('click', () => setView('help'));
+$('#help-back').addEventListener('click', leaveHelp);
+$('#help-report').addEventListener('click', () => void openWebLink('https://github.com/Trimmendous/NoAI/issues/new'));
+document.addEventListener('keydown', event => {
+  const typing = event.target.closest?.('input, textarea, select, [contenteditable="true"]');
+  // ? (when not typing) or ⌘/ opens Help; Esc leaves it.
+  if ((event.key === '?' && !typing && !event.metaKey && !event.ctrlKey) || ((event.metaKey || event.ctrlKey) && event.key === '/')) {
+    event.preventDefault();
+    if (view !== 'help') setView('help');
+  } else if (event.key === 'Escape' && view === 'help' && !typing) leaveHelp();
+});
+
 // ⌘, (Ctrl+, elsewhere) opens Settings, as in other Mac apps.
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === ',') { event.preventDefault(); setView('settings'); } });
 
@@ -748,12 +781,13 @@ $('#budget-reserve').addEventListener('change', event => void saveAutomation({ r
 let instructionsLoaded = false;
 async function loadJobInstructions() {
   const form = $('#job-instructions-form'), status = $('#job-instructions-status');
-  if (!native) { form.querySelectorAll('textarea, button').forEach(node => { node.disabled = true; }); status.textContent = 'Open the desktop app to set job instructions.'; return; }
+  if (!native) { form.querySelectorAll('textarea, button, input').forEach(node => { node.disabled = true; }); status.textContent = 'Open the desktop app to set job instructions.'; return; }
   if (instructionsLoaded) return;
   try {
     const saved = await getJobInstructions();
     $('#job-instructions-recurring').value = saved?.recurring || '';
     $('#job-instructions-one-time').value = saved?.oneTime || '';
+    $('#job-instructions-summary-log').checked = saved?.summaryLog !== false;
     instructionsLoaded = true;
     status.textContent = '';
   } catch (error) { status.textContent = `Could not load instructions: ${String(error)}`; }
@@ -764,7 +798,7 @@ $('#job-instructions-form').addEventListener('submit', async event => {
   const button = $('#job-instructions-save'), status = $('#job-instructions-status');
   button.disabled = true; status.textContent = 'Saving…';
   try {
-    const saved = await setJobInstructions({ recurring: $('#job-instructions-recurring').value, oneTime: $('#job-instructions-one-time').value });
+    const saved = await setJobInstructions({ recurring: $('#job-instructions-recurring').value, oneTime: $('#job-instructions-one-time').value, summaryLog: $('#job-instructions-summary-log').checked });
     $('#job-instructions-recurring').value = saved.recurring; $('#job-instructions-one-time').value = saved.oneTime;
     status.textContent = 'Saved. Applies from the next run.';
   } catch (error) { status.textContent = String(error); }
@@ -956,6 +990,7 @@ const palette = initPalette({
     ...(active() ? [{ key: 'tear-off', title: 'Open this chat in a new window', run: () => tearOff(active().id) }] : []),
     { key: 'sidebar', title: 'Show or hide the sidebar', hint: '⌘\\', run: () => setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed')) },
     { key: 'changelog', title: 'What’s new', run: () => $('#version-button').click() },
+    ...HELP_SECTIONS.map(section => ({ key: `help-${section.id}`, title: `Help: ${section.title}`, hint: section.subtitle, run: () => { setView('help'); void helpPanel?.open(section.id); } })),
     ...(pluginHost?.commands() || []).filter(command => command.context !== 'chat' || active()).map(command => ({
       key: `plugin-${command.key}`, title: command.title, hint: command.plugin.name,
       run: () => pluginHost.run(command, command.context === 'chat' ? { chatId: active()?.id } : {}),

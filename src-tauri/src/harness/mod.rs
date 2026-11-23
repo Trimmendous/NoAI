@@ -167,6 +167,12 @@ pub trait Harness: Send + Sync {
     fn subagent_parent(&self, _path: &Path) -> Option<PathBuf> {
         None
     }
+    /// The subagent's type ("Explore", "web-fetch"…) when `path` is a subagent's
+    /// transcript. Agents that mark subagents inside the transcript instead set
+    /// `FileState::subagent` from `metrics_line`.
+    fn subagent_type(&self, path: &Path) -> Option<String> {
+        self.subagent_parent(path).map(|_| "subagent".into())
+    }
 }
 
 static BUILT_IN: &[&dyn Harness] = &[&codex::Codex, &claude::Claude];
