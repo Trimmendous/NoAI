@@ -66,7 +66,7 @@ export function formatShortTime(seconds, now = new Date()) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
 }
 
-const LIST_STEP = 25;
+const PAGE_SIZE = 20;
 // Smart filters, like Reminders' smart lists.
 const FILTERS = [
   { id: 'scheduled', label: 'Scheduled', icon: 'clock' },
@@ -118,7 +118,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   let renderedSignature = '';
   let filter = 'scheduled';
   let query = '';
-  let limit = LIST_STEP;
+  let page = 0;
+  let sort = 'default';
   let metricsCache = [], metricsAt = 0, metricsRequest = null;
   async function sessionMetrics() {
     if (!fetchMetrics) return metricsCache;
@@ -363,7 +364,8 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   $('#scheduled-new-job').addEventListener('click', showForm);
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
   dialog.addEventListener('close', () => { if ((editing || copying) && !busy) resetForm(); });
-  $('#job-search').addEventListener('input', event => { query = event.target.value.trim().toLowerCase(); limit = LIST_STEP; renderList(); });
+  $('#job-search').addEventListener('input', event => { query = event.target.value.trim().toLowerCase(); page = 0; renderList(); });
+  $('#job-sort').addEventListener('change', event => { sort = event.target.value; page = 0; renderList(); });
 
   function button(label, action, className = 'secondary-button') {
     const node = element('button', className, label);
@@ -622,39 +624,93 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   $('#job-conversation-back').addEventListener('click', () => { conversationOpen = false; navigate('job'); $('#job-open-conversation')?.focus({ preventScroll: true }); });
   $('#job-refresh').addEventListener('click', () => void refresh());
 
-  // One compact row per job, in a single grouped list. Actions live on the job page.
+  // The jobs table: one line per job with its last runs as bars, so a job that
+  // keeps failing stands out. In Completed, one line per finished run.
+  const HISTORY = 12;
+  const median = values => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b), mid = sorted.length >> 1; return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2; };
+  const seconds = value => value == null ? '—' : value < 60 ? `${Math.round(value)}s` : value < 3600 ? `${Math.round(value / 60)} min` : `${Math.floor(value / 3600)}h ${Math.round(value % 3600 / 60)}m`;
+  function jobStats(task) {
+    const runs = [...(runCache.get(task.id) || [])].sort((a, b) => a.startedAt - b.startedAt);
+    const states = runs.map(runStatus);
+    const ok = states.filter(state => state === 'completed').length;
+    const bad = states.filter(state => ['failed', 'needs_attention'].includes(state)).length;
+    const finished = runs.filter(run => run.finishedAt);
+    const tokens = runs.map(runTokens).filter(Boolean);
+    return {
+      runs,
+      recent: states.slice(-HISTORY),
+      rate: ok + bad ? ok / (ok + bad) : null,
+      typical: median(finished.map(run => Math.max(0, run.finishedAt - run.startedAt))),
+      tokens: tokens.length ? tokens.reduce((a, b) => a + b, 0) / tokens.length : null,
+    };
+  }
+  function historyBars(stats, task) {
+    const bars = element('span', 'job-history');
+    const tone = state => state === 'completed' ? 'good' : ['failed', 'needs_attention'].includes(state) ? 'bad' : ['waiting'].includes(state) ? 'wait' : ['running'].includes(state) ? 'busy' : 'muted';
+    for (let index = 0; index < HISTORY - stats.recent.length; index += 1) bars.append(element('span', 'job-history-bar is-empty'));
+    for (const state of stats.recent) {
+      const bar = element('span', `job-history-bar is-${tone(state)}`);
+      bar.title = STATUS[state] || state;
+      bars.append(bar);
+    }
+    const ok = stats.recent.filter(state => state === 'completed').length;
+    const bad = stats.recent.filter(state => ['failed', 'needs_attention'].includes(state)).length;
+    bars.setAttribute('role', 'img');
+    bars.setAttribute('aria-label', stats.recent.length ? `${task.title}, last ${stats.recent.length} runs: ${ok} worked, ${bad} failed` : `${task.title} hasn’t run yet`);
+    return bars;
+  }
+  function cell(content, className = '') {
+    const node = element('td', className);
+    if (content instanceof Node) node.append(content); else node.textContent = content;
+    return node;
+  }
   function renderRow(task, completedRun = null) {
-    const runs = [...(runCache.get(task.id) || [])].sort((a, b) => b.startedAt - a.startedAt);
-    const latest = completedRun || runs.find(run => run.runId === task.lastRunId) || runs[0];
+    const stats = jobStats(task);
+    const latest = completedRun || stats.runs.find(run => run.runId === task.lastRunId) || stats.runs.at(-1);
     const status = completedRun || task.status === 'running' && latest ? runStatus(latest) : task.status;
     const finished = !!completedRun || !task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status);
-    const row = element('button', `job-row is-${status}`);
-    row.type = 'button';
-    row.addEventListener('click', () => openJob(task, completedRun));
+    const row = element('tr', `job-table-row is-${status}`);
+    row.addEventListener('click', event => { if (!event.target.closest('.job-table-actions button, .job-row-open')) openJob(task, completedRun); });
+    const open = element('button', 'job-row-open');
+    open.type = 'button';
+    open.addEventListener('click', () => openJob(task, completedRun));
     const copy = element('span', 'job-row-copy');
-    copy.append(element('span', 'job-row-title', task.title));
     const agent = getHarness(task.harness)?.label || task.harness;
     const where = task.projectPath ? basename(task.projectPath) : '';
-    const when = completedRun ? `Ran ${formatShortTime(completedRun.finishedAt || completedRun.startedAt)}` : formatScheduledInterval(task.intervalSeconds);
-    // Recurring jobs show how many times they've run; a past run shows which one it was.
-    const ordinal = completedRun ? runs.length - runs.findIndex(item => item.runId === completedRun.runId) : 0;
-    const count = completedRun ? `Run ${ordinal} of ${runs.length} · ${formatScheduledInterval(task.intervalSeconds)}` : task.intervalSeconds ? `${runs.length} run${runs.length === 1 ? '' : 's'}` : '';
-    copy.append(element('span', 'job-row-subtitle', [when, count, agent, where].filter(Boolean).join(' · ')));
-    const trailing = element('span', 'job-row-trailing');
-    if (['running', 'waiting', 'failed', 'needs_attention', 'paused', 'cancelled'].includes(status) || finished) trailing.append(badge(status));
-    else if (task.nextRunAt && task.status === 'scheduled') trailing.append(element('span', 'job-row-when', formatShortTime(task.nextRunAt)));
-    if (task.dangerouslyBypassPermissions && !finished) trailing.prepend(element('span', 'job-row-flag', 'Bypass'));
-    trailing.append(icon('chevron', 'job-row-chevron'));
-    row.append(jobTile(finished ? 'done' : task.intervalSeconds ? 'repeat' : 'clock', status), copy, trailing);
-    const wrap = element('div', 'job-row-wrap');
-    wrap.append(row);
-    const quick = completedRun ? [] : jobActions(task, { compact: true });
-    if (quick.length && native) {
-      const actions = element('div', 'job-row-actions');
-      actions.append(...quick);
-      wrap.append(actions);
+    const number = completedRun ? stats.runs.findIndex(run => run.runId === completedRun.runId) + 1 : 0;
+    copy.append(element('span', 'job-row-title', task.title), element('span', 'job-row-subtitle', [completedRun && task.intervalSeconds ? `Run #${number}` : '', formatScheduledInterval(task.intervalSeconds), agent, where].filter(Boolean).join(' · ')));
+    open.append(jobTile(finished ? 'done' : task.intervalSeconds ? 'repeat' : 'clock', status), copy);
+    const name = cell(open, 'job-cell-name');
+    if (task.dangerouslyBypassPermissions && !finished) name.append(element('span', 'job-row-flag', 'Bypass'));
+    const state = element('span', 'job-row-state');
+    if (completedRun) state.append(badge(status));
+    else if (['running', 'waiting', 'failed', 'needs_attention', 'paused', 'cancelled'].includes(status) || finished) state.append(badge(status));
+    else if (task.nextRunAt && task.status === 'scheduled') state.append(element('span', 'job-row-when', formatShortTime(task.nextRunAt)));
+    const rate = element('span', stats.rate == null ? '' : stats.rate >= .95 ? 'is-good' : stats.rate >= .8 ? 'is-warn' : 'is-bad', stats.rate == null ? '—' : `${Math.round(stats.rate * 100)}%`);
+    const cells = completedRun
+      ? [name, cell(historyBars(stats, task)), cell(state), cell(duration(completedRun) || '—', 'is-number'), cell(runTokens(completedRun) ? compactNumber(runTokens(completedRun)) : '—', 'is-number'), cell(formatShortTime(completedRun.finishedAt || completedRun.startedAt))]
+      : [name, cell(historyBars(stats, task)), cell(rate, 'is-number'), cell(seconds(stats.typical), 'is-number'), cell(stats.tokens ? compactNumber(stats.tokens) : '—', 'is-number'), cell(state)];
+    row.append(...cells);
+    const actions = element('td', 'job-table-actions');
+    if (!completedRun && native) actions.append(...jobActions(task, { compact: true }));
+    row.append(actions);
+    return row;
+  }
+
+  const SORTS = {
+    default: { label: 'Next run', completedLabel: 'Newest first' },
+    rate: { label: 'Success rate, lowest first' },
+    name: { label: 'Name' },
+    tokens: { label: 'Tokens per run, most first' },
+  };
+  function sortItems(items) {
+    if (sort === 'default') {
+      if (filter === 'completed') return items;
+      const next = item => item.task.status === 'running' || item.task.status === 'waiting' ? -1 : item.task.nextRunAt || Infinity;
+      return [...items].sort((a, b) => next(a) - next(b));
     }
-    return wrap;
+    const key = { rate: item => jobStats(item.task).rate ?? 2, name: item => item.task.title.toLowerCase(), tokens: item => -(jobStats(item.task).tokens || 0) }[sort];
+    return [...items].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0);
   }
 
   function filtered() {
@@ -681,11 +737,12 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   }
 
   function renderList() {
-    const signature = JSON.stringify([tasks, filter, query, limit, [...runCache], [...runErrors]]);
+    const signature = JSON.stringify([tasks, filter, query, page, sort, [...runCache], [...runErrors]]);
     if (signature === renderedSignature) return;
     renderedSignature = signature;
     const lists = filtered();
     $('#job-search-wrap').hidden = !tasks.length;
+    $('#job-tools').hidden = !tasks.length;
     const tiles = $('#job-filters');
     tiles.hidden = !tasks.length;
     tiles.replaceChildren(...FILTERS.map(item => {
@@ -696,7 +753,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
       const dot = element('span', 'job-filter-icon'); dot.append(icon(item.icon));
       top.append(dot, element('strong', '', String(lists[item.id].length)));
       tile.append(top, element('span', 'job-filter-label', item.label));
-      tile.addEventListener('click', () => { filter = item.id; limit = LIST_STEP; renderList(); });
+      tile.addEventListener('click', () => { filter = item.id; page = 0; renderList(); });
       return tile;
     }));
     const fragment = document.createDocumentFragment();
@@ -707,30 +764,50 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
       listNode.replaceChildren(empty);
       return;
     }
-    const items = lists[filter].filter(matches);
-    const shown = items.slice(0, limit);
-    // In Scheduled, recurring and one-time jobs get their own headed groups.
-    const groups = filter === 'scheduled'
-      ? [['Recurring', shown.filter(item => item.task.intervalSeconds)], ['One-time', shown.filter(item => !item.task.intervalSeconds)]]
-      : [[FILTERS.find(item => item.id === filter).label, shown]];
-    for (const [label, group] of groups) {
-      if (!group.length) continue;
-      const section = element('section', 'job-group');
-      section.setAttribute('aria-label', `${label} jobs`);
-      section.append(element('h3', 'job-group-title', label));
-      const list = element('div', 'job-list');
-      for (const item of group) list.append(renderRow(item.task, item.run || null));
-      section.append(list);
-      fragment.append(section);
+    const items = sortItems(lists[filter].filter(matches));
+    const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    page = Math.min(page, pages - 1);
+    const first = page * PAGE_SIZE;
+    const shown = items.slice(first, first + PAGE_SIZE);
+    const sortSelect = $('#job-sort');
+    sortSelect.replaceChildren(...Object.entries(SORTS).map(([id, item]) => new Option(filter === 'completed' && item.completedLabel ? item.completedLabel : item.label, id)));
+    sortSelect.value = sort;
+    if (shown.length) {
+      const wrap = element('div', 'job-table-wrap');
+      const table = element('table', 'job-table');
+      const caption = element('caption', 'sr-only', `${FILTERS.find(item => item.id === filter).label} jobs`);
+      const head = element('thead'), headRow = element('tr');
+      const columns = filter === 'completed' ? ['Job', 'Last 12 runs', 'Result', 'Took', 'Tokens', 'Finished', ''] : ['Job', 'Last 12 runs', 'Success', 'Typical run', 'Tokens / run', 'Next', ''];
+      for (const [index, label] of columns.entries()) {
+        const th = element('th', [2, 3, 4].includes(index) && !(filter === 'completed' && index === 2) ? 'is-number' : '', label);
+        th.scope = 'col';
+        if (!label) th.append(element('span', 'sr-only', 'Actions'));
+        headRow.append(th);
+      }
+      head.append(headRow);
+      const body = element('tbody');
+      for (const item of shown) body.append(renderRow(item.task, item.run || null));
+      table.append(caption, head, body);
+      wrap.append(table);
+      fragment.append(wrap);
     }
     if (!items.length) {
       const none = element('div', 'job-list job-list-empty');
-      none.append(element('p', '', query ? `No jobs match “${query}”.` : filter === 'attention' ? 'Nothing needs you. Nice.' : filter === 'running' ? 'Nothing is running right now.' : filter === 'completed' ? 'Finished jobs will show up here.' : 'No upcoming jobs.'));
+      none.append(element('p', '', query ? `No jobs match “${query}”.` : filter === 'attention' ? 'Nothing needs you. Nice.' : filter === 'running' ? 'Nothing is running right now.' : filter === 'completed' ? 'Finished jobs and runs will show up here.' : 'No upcoming jobs.'));
       fragment.append(none);
     }
-    if (items.length > shown.length) {
-      const more = button(`Show ${Math.min(LIST_STEP, items.length - shown.length)} more · ${items.length - shown.length} hidden`, () => { limit += LIST_STEP; renderList(); }, 'job-show-more');
-      fragment.append(more);
+    if (pages > 1) {
+      const pager = element('nav', 'run-pager job-pager');
+      pager.setAttribute('aria-label', 'Job pages');
+      const turn = step => { page += step; renderList(); $('#view-jobs').parentElement.scrollTop = 0; };
+      const previous = button('‹ Previous', () => turn(-1), 'secondary-button is-compact');
+      const next = button('Next ›', () => turn(1), 'secondary-button is-compact');
+      previous.disabled = page === 0;
+      next.disabled = page >= pages - 1;
+      const where = element('span', 'run-pager-label', `${first + 1}–${first + shown.length} of ${items.length} · Page ${page + 1} of ${pages}`);
+      where.setAttribute('aria-live', 'polite');
+      pager.append(previous, where, next);
+      fragment.append(pager);
     }
     listNode.replaceChildren(fragment);
   }

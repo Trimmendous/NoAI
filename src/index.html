@@ -245,7 +245,10 @@
             <section id="view-jobs" class="page-view scheduled-view" aria-labelledby="scheduled-title" hidden>
               <div class="page-heading page-heading-actions"><div><h2 id="scheduled-title">Jobs</h2><p>Work your agents do on a schedule, even while Noai is closed.</p></div><div class="page-actions"><button id="scheduled-refresh" class="secondary-button" type="button">Refresh</button><button id="scheduled-new-job" class="primary-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>New job</button></div></div>
               <div id="job-filters" class="job-filters" aria-label="Filter jobs" hidden></div>
-              <label id="job-search-wrap" class="search-field job-search" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><input id="job-search" type="search" placeholder="Search jobs" aria-label="Search jobs" spellcheck="false" /></label>
+              <div id="job-tools" class="job-tools" hidden>
+                <label id="job-search-wrap" class="search-field job-search" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg><input id="job-search" type="search" placeholder="Search jobs" aria-label="Search jobs" spellcheck="false" /></label>
+                <label class="job-sort-label">Sort <select id="job-sort" class="ui-popup"></select></label>
+              </div>
               <div id="scheduled-list" class="page-list" aria-live="polite"><div class="content-placeholder"><h3>Loading jobs</h3><p>Your saved jobs will appear here.</p></div></div>
               <details class="job-guide" id="job-guide">
                 <summary>New to jobs? A quick guide for the app and the terminal</summary>

@@ -218,8 +218,8 @@ try {
   await chat.locator('#scheduled-interval').fill('2');
   await chat.locator('#scheduled-interval-unit').selectOption('3600');
   await chat.locator('#scheduled-submit').click();
-  const jobRow = title => chat.locator('.job-row').filter({has:chat.locator('.job-row-title', {hasText:title})});
-  await chat.getByRole('region', {name:'Recurring jobs', exact:true}).locator('.job-row').filter({hasText:'Recurring review'}).waitFor();
+  const jobRow = title => chat.locator('.job-table-row').filter({has:chat.locator('.job-row-title', {hasText:title})});
+  await chat.locator('#scheduled-list .job-table-row').filter({hasText:'Recurring review'}).waitFor();
   assert.equal(await chat.locator('#scheduled-dialog').evaluate(node => node.open), false);
   let task = await chat.evaluate(() => window.testTasks[0]);
   assert.equal(task.intervalSeconds, 7200);
@@ -248,7 +248,7 @@ try {
   await chat.reload();
   await chat.locator('button[data-view="chat"]').click();
   await chat.locator('button[data-view="jobs"]').click();
-  assert.equal(await chat.locator('#scheduled-list .job-row').count(), 2);
+  assert.equal(await chat.locator('#scheduled-list .job-table-row').count(), 2);
   // Edit and cancel live on the job page.
   const editFromDetail = async title => { await jobRow(title).click(); await chat.locator('#job-content').getByRole('button', {name:'Edit', exact:true}).click(); await chat.locator('#scheduled-dialog[open]').waitFor(); };
   await editFromDetail('Recurring review');
@@ -318,22 +318,22 @@ try {
   });
   await chat.locator('#scheduled-refresh').click();
   await chat.locator('.job-filter.is-scheduled').click();
-  const recurringSection = chat.getByRole('region', {name:'Recurring jobs', exact:true});
-  const oneOffSection = chat.getByRole('region', {name:'One-time jobs', exact:true});
-  await recurringSection.locator('.scheduled-status').filter({hasText:'Waiting for reset'}).waitFor();
-  assert.equal(await oneOffSection.locator('.job-row').count(), 2);
-  assert.match(await oneOffSection.innerText(), /Needs attention/);
+  const list = chat.locator('#scheduled-list');
+  await list.locator('.scheduled-status').filter({hasText:'Waiting for reset'}).waitFor();
+  assert.equal(await list.locator('.job-table-row').count(), 3);
+  assert.match(await list.innerText(), /Needs attention/);
   await chat.locator('.job-filter.is-attention').click();
-  assert.equal(await chat.locator('#scheduled-list .job-row').count(), 2);
+  assert.equal(await chat.locator('#scheduled-list .job-table-row').count(), 2);
   await chat.locator('.job-filter.is-completed').click();
-  const completedSection = chat.getByRole('region', {name:'Completed jobs', exact:true});
-  assert.equal(await completedSection.locator('.job-row').count(), 25);
-  assert.match(await completedSection.innerText(), /Succeeded/);
-  await chat.locator('.job-show-more').click();
-  assert.equal(await completedSection.locator('.job-row').count(), 30);
-  assert.equal(await chat.locator('.job-show-more').count(), 0);
+  // 30 finished jobs: 20 on the first page, 10 on the second.
+  assert.equal(await list.locator('.job-table-row').count(), 20);
+  assert.match(await list.innerText(), /Succeeded/);
+  assert.match(await chat.locator('.job-pager').innerText(), /1–20 of 30/);
+  await chat.locator('.job-pager').getByRole('button', {name:'Next ›'}).click();
+  assert.equal(await list.locator('.job-table-row').count(), 10);
   await chat.locator('#job-search').fill('Finished 7');
-  assert.equal(await completedSection.locator('.job-row').count(), 1);
+  assert.equal(await list.locator('.job-table-row').count(), 1);
+  assert.equal(await chat.locator('.job-pager').count(), 0);
   await chat.locator('#job-search').fill('');
   await chat.locator('#scheduled-title').scrollIntoViewIfNeeded();
   await chat.screenshot({path:'/tmp/noai-check/jobs-overview.png', fullPage:true});
