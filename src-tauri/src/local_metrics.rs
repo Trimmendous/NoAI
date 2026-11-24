@@ -202,7 +202,9 @@ fn scan(path: &Path, harness: &str, state: &mut FileState) -> std::io::Result<bo
             || line.contains("api_error")
             || line.contains("stream_error")
             || line.contains("\"type\":\"error\"")
-            || line.contains("\"assistant\""))
+            || line.contains("\"assistant\"")
+            || line.contains("\"tokens\":")
+            || line.contains("\"projectHash\""))
         {
             continue;
         }

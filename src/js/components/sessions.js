@@ -59,6 +59,7 @@ export function combineSessions(local, conversations) {
 }
 
 export function initSessions({list, detail, getConversations, fetchMetrics, navigate, native}) {
+  let lastPage = 0;
   let sessions = [], page = 0, selected = null, generation = 0, loading = null, listScroll = 0;
   const body = $('#sessions-body'), search = $('#sessions-search'), sort = $('#sessions-sort');
   const modelSelect = $('#sessions-model'), folderSelect = $('#sessions-folder'), periodSelect = $('#sessions-period');
@@ -129,9 +130,10 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
     }
     $('#sessions-empty').hidden = filtered.length > 0;
     $('#sessions-count').textContent = `${filtered.length.toLocaleString()} session${filtered.length === 1 ? '' : 's'}`;
-    $('#sessions-page').textContent = `${page+1} / ${pages}`;
-    $('#sessions-previous').disabled = page === 0;
-    $('#sessions-next').disabled = page === pages-1;
+    $('#sessions-page').textContent = filtered.length ? `${page*PAGE_SIZE+1}–${Math.min(filtered.length,(page+1)*PAGE_SIZE)} of ${filtered.length} · Page ${page+1} of ${pages}` : '';
+    $('#sessions-previous').disabled = $('#sessions-first').disabled = page === 0;
+    $('#sessions-next').disabled = $('#sessions-last').disabled = page === pages-1;
+    lastPage = pages-1;
   }
   async function refresh() {
     if (loading) return loading;
@@ -220,6 +222,8 @@ export function initSessions({list, detail, getConversations, fetchMetrics, navi
   });
   $('#sessions-previous').addEventListener('click', () => { page--; render(); });
   $('#sessions-next').addEventListener('click', () => { page++; render(); });
+  $('#sessions-first').addEventListener('click', () => { page = 0; render(); });
+  $('#sessions-last').addEventListener('click', () => { page = lastPage; render(); });
   async function route() {
     if (location.hash.startsWith('#session=')) {
       let id; try { id = decodeURIComponent(location.hash.slice(9)); } catch { return; }

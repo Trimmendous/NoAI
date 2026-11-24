@@ -916,13 +916,15 @@ function showThemePage(goToSelected = false) {
   $('#theme-pages').hidden = pages < 2;
   $('#theme-empty').hidden = matches.length > 0;
   $('#theme-page-label').textContent = `Page ${themePage + 1} of ${pages}`;
-  $('#theme-prev').disabled = themePage === 0;
-  $('#theme-next').disabled = themePage >= pages - 1;
+  $('#theme-prev').disabled = $('#theme-first').disabled = themePage === 0;
+  $('#theme-next').disabled = $('#theme-last').disabled = themePage >= pages - 1;
   $('#theme-count').textContent = query ? `${matches.length} of ${choices.length}` : `${choices.length} themes`;
 }
 $('#theme-search').addEventListener('input', () => { themePage = 0; showThemePage(); });
 $('#theme-prev').addEventListener('click', () => { themePage -= 1; showThemePage(); });
 $('#theme-next').addEventListener('click', () => { themePage += 1; showThemePage(); });
+$('#theme-first').addEventListener('click', () => { themePage = 0; showThemePage(); });
+$('#theme-last').addEventListener('click', () => { themePage = Infinity; showThemePage(); });
 
 async function pluginSendChat({ prompt, chatId, harness, model } = {}) {
   const text = typeof prompt === 'string' ? prompt.trim().slice(0, 100000) : '';

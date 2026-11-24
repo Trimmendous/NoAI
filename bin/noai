@@ -12,7 +12,7 @@ const HELP = `Noai CLI — schedule local coding-agent tasks
 Usage:
   noai jobs list [--socket PATH]
   noai jobs create --title TEXT (--prompt TEXT | --prompt-file PATH)
-      [--harness codex|claude] [--model MODEL] [--project DIR]
+      [--harness codex|claude|gemini] [--model MODEL] [--project DIR]
       [--at now|ISO-8601] [--every 30m|2h|1d] [--auto-resume true|false]
       [--permissions workspace-network|workspace-write|read-only|provider-default|auto-review]
       [--dangerously-bypass-permissions true|false] [--worktree true|false]
@@ -131,9 +131,15 @@ export function parse(argv) {
   }
   if (!prompt?.trim()) fail('Prompt cannot be empty');
   const harness = options['--harness'] ?? 'codex';
-  if (!['codex', 'claude'].includes(harness)) fail('--harness must be codex or claude');
-  const permissions = options['--permissions'] ?? (harness === 'codex' ? 'workspace-network' : 'auto-review');
-  const supported = harness === 'codex' ? ['workspace-network', 'workspace-write', 'read-only', 'provider-default'] : ['auto-review', 'provider-default'];
+  // Each agent's job modes, its default first (mirrors the Rust harness definitions).
+  const modes = {
+    codex: ['workspace-network', 'workspace-write', 'read-only', 'provider-default'],
+    claude: ['auto-review', 'provider-default'],
+    gemini: ['workspace-write', 'read-only', 'provider-default'],
+  };
+  if (!Object.hasOwn(modes, harness)) fail(`--harness must be one of: ${Object.keys(modes).join(', ')}`);
+  const supported = modes[harness];
+  const permissions = options['--permissions'] ?? supported[0];
   if (!supported.includes(permissions)) fail(`--permissions for ${harness} must be one of: ${supported.join(', ')}`);
   const input = {
     permissions,

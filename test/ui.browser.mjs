@@ -65,7 +65,7 @@ try {
  assert.equal(await page.locator('#session-transcript summary').filter({hasText:'Recorded thinking'}).count(),1);
  await page.screenshot({path:`${out}/session-conversation.png`});
  await page.locator('#session-back').click();assert.ok(await page.locator('#session-open-conversation').isVisible());
- await page.locator('#session-back').click();assert.equal(await page.locator('#sessions-page').innerText(),'2 / 3');
+ await page.locator('#session-back').click();assert.match(await page.locator('#sessions-page').innerText(),/Page 2 of 3/);
  assert.ok(Math.abs(await page.locator('.main-content').evaluate(el=>el.scrollTop)-scroll)<2);
  await go('jobs');await page.locator('.job-title-button').first().click();
  await page.waitForFunction(()=>document.querySelector('#job-content svg'));

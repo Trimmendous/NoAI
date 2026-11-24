@@ -6,6 +6,7 @@
 
 mod claude;
 mod codex;
+mod gemini;
 mod plugin_agent;
 
 use crate::adapters::{JobPermissions, RunEvent, RunRequest};
@@ -175,7 +176,7 @@ pub trait Harness: Send + Sync {
     }
 }
 
-static BUILT_IN: &[&dyn Harness] = &[&codex::Codex, &claude::Claude];
+static BUILT_IN: &[&dyn Harness] = &[&codex::Codex, &claude::Claude, &gemini::Gemini];
 
 /// Agents added by enabled plugins. Each reload leaks the few small agent
 /// descriptions it replaces, which only happens when plugins are switched.

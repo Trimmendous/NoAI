@@ -331,3 +331,7 @@ select.text-field, select.ui-popup, .scheduled-field select, .metrics-controls s
 .job-summary-log span { display: grid; gap: 3px; }
 .job-summary-log strong { font-size: 13.5px; font-weight: 600; }
 .job-summary-log small { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+
+/* First / last page buttons, used by every pager. */
+.pager-edge { display: inline-flex; align-items: center; justify-content: center; width: 30px; padding: 0 !important; }
+.pager-edge svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }

@@ -18,7 +18,7 @@
 
 ## Coverage boundaries
 
-- Gemini, Copilot, and Cursor automatic usage readers remain unsupported; no inferred quotas are shown.
+- Gemini CLI runs as an agent but reports no account quota; Copilot and Cursor usage readers remain unsupported. No inferred quotas are shown.
 - An explicit reset and verified account are necessary for automatic resume. Time-only messages without a timezone and unclassified errors are insufficient.
 - Interactive tool approvals cannot be answered in Noai yet. Claude headless mode denies those requests; Codex retains its configured policy.
 - The systemd user service runs independently of the GUI. Logout behavior follows the system user-manager policy; Noai does not enable lingering or wake the computer.

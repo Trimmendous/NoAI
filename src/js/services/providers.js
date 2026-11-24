@@ -1,6 +1,5 @@
 // Usage sources that are not agents Noai runs. Agents come from runtime_status.
 export const USAGE_ONLY_PROVIDERS = Object.freeze([
-  Object.freeze({ id: 'gemini', label: 'Gemini CLI', harness: null }),
   Object.freeze({ id: 'copilot', label: 'GitHub Copilot', harness: null }),
   Object.freeze({ id: 'cursor', label: 'Cursor', harness: null }),
   Object.freeze({ id: 'openrouter', label: 'OpenRouter', harness: null }),

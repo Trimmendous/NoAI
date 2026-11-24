@@ -1,6 +1,6 @@
 # Noai
 
-A calm little desktop app for working with coding agents like Codex and Claude Code. Chat with them, schedule jobs that run while you're away, and see what they've been up to. Everything stays on your machine.
+A calm little desktop app for working with coding agents like Codex, Claude Code and Gemini CLI. Chat with them, schedule jobs that run while you're away, and see what they've been up to. Everything stays on your machine.
 
 It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 
@@ -19,7 +19,7 @@ It's built with Tauri, Rust and plain HTML/CSS/JS: no frameworks, no tracking.
 
 ## Getting started
 
-You'll need Node 22+, Rust and the Tauri CLI (`cargo install tauri-cli --version '^2'`). You'll also need at least one agent CLI (Codex or Claude Code) installed and signed in.
+You'll need Node 22+, Rust and the Tauri CLI (`cargo install tauri-cli --version '^2'`). You'll also need at least one agent CLI (Codex, Claude Code or Gemini CLI) installed and signed in.
 
 ```sh
 npm run desktop

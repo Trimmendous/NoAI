@@ -373,6 +373,29 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     return node;
   }
 
+  // Page controls: first |‹, previous, "a–b of n", next, last ›|.
+  function pagerNav({ label, className, page: current, pages, text, previous, next, first, last, go }) {
+    const nav = element('nav', className);
+    nav.setAttribute('aria-label', label);
+    const edge = (name, d, target) => {
+      const node = button('', () => go(target), 'secondary-button is-compact pager-edge');
+      node.setAttribute('aria-label', name);
+      node.title = name;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('aria-hidden', 'true');
+      for (const path of d) { const line = document.createElementNS('http://www.w3.org/2000/svg', 'path'); line.setAttribute('d', path); svg.append(line); }
+      node.append(svg);
+      node.disabled = current === target;
+      return node;
+    };
+    const step = (name, target) => { const node = button(name, () => go(target), 'secondary-button is-compact'); node.disabled = target < 0 || target >= pages; return node; };
+    const where = element('span', 'run-pager-label', text);
+    where.setAttribute('aria-live', 'polite');
+    nav.append(edge(first, ['M7 6v12', 'M17 6l-6 6 6 6'], 0), step(previous, current - 1), where, step(next, current + 1), edge(last, ['M17 6v12', 'M7 6l6 6-6 6'], pages - 1));
+    return nav;
+  }
+
   function retryButton(task) {
     if (!retry || !['needs_attention', 'failed', 'cancelled'].includes(task.status)) return null;
     return button(task.status === 'cancelled' ? 'Restart' : 'Retry', async event => {
@@ -491,17 +514,12 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     if (rows.length) content.append(uiGroup(`Runs · ${runs.length}`, rows, 'Runs'));
     else content.append(uiGroup('Runs', [element('p', 'ui-list-empty', task.nextRunAt ? `No runs yet. The first one starts ${formatShortTime(task.nextRunAt)}.` : 'No runs yet.')], 'Runs'));
     if (pages > 1) {
-      const turn = delta => { runPage = Math.min(pages - 1, Math.max(0, runPage + delta)); detailSignature = ''; renderDetail(); content.querySelector('.run-pager')?.scrollIntoView({ block: 'nearest' }); };
-      const pager = element('nav', 'run-pager');
-      pager.setAttribute('aria-label', 'Run pages');
-      const previous = button('‹ Newer', () => turn(-1), 'secondary-button is-compact');
-      const next = button('Older ›', () => turn(1), 'secondary-button is-compact');
-      previous.disabled = runPage === 0;
-      next.disabled = runPage >= pages - 1;
-      const where = element('span', 'run-pager-label', `Runs ${runs.length - first - Math.min(RUNS_PER_PAGE, runs.length - first) + 1}–${runs.length - first} of ${runs.length} · Page ${runPage + 1} of ${pages}`);
-      where.setAttribute('aria-live', 'polite');
-      pager.append(previous, where, next);
-      content.append(pager);
+      content.append(pagerNav({
+        label: 'Run pages', className: 'run-pager', page: runPage, pages,
+        text: `Runs ${runs.length - first - Math.min(RUNS_PER_PAGE, runs.length - first) + 1}–${runs.length - first} of ${runs.length} · Page ${runPage + 1} of ${pages}`,
+        previous: '‹ Newer', next: 'Older ›', first: 'Newest runs', last: 'Oldest runs',
+        go: target => { runPage = target; detailSignature = ''; renderDetail(); content.querySelector('.run-pager')?.scrollIntoView({ block: 'nearest' }); },
+      }));
     }
   }
 
@@ -797,17 +815,12 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
       fragment.append(none);
     }
     if (pages > 1) {
-      const pager = element('nav', 'run-pager job-pager');
-      pager.setAttribute('aria-label', 'Job pages');
-      const turn = step => { page += step; renderList(); $('#view-jobs').parentElement.scrollTop = 0; };
-      const previous = button('‹ Previous', () => turn(-1), 'secondary-button is-compact');
-      const next = button('Next ›', () => turn(1), 'secondary-button is-compact');
-      previous.disabled = page === 0;
-      next.disabled = page >= pages - 1;
-      const where = element('span', 'run-pager-label', `${first + 1}–${first + shown.length} of ${items.length} · Page ${page + 1} of ${pages}`);
-      where.setAttribute('aria-live', 'polite');
-      pager.append(previous, where, next);
-      fragment.append(pager);
+      fragment.append(pagerNav({
+        label: 'Job pages', className: 'run-pager job-pager', page, pages,
+        text: `${first + 1}–${first + shown.length} of ${items.length} · Page ${page + 1} of ${pages}`,
+        previous: '‹ Previous', next: 'Next ›', first: 'First page', last: 'Last page',
+        go: target => { page = target; renderList(); $('#view-jobs').parentElement.scrollTop = 0; },
+      }));
     }
     listNode.replaceChildren(fragment);
   }

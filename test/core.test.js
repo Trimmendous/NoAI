@@ -91,7 +91,7 @@ test('provider cards only report observed installation and leave usage unknown',
   ] });
   assert.equal(cards.find((card) => card.id === 'codex').installed, true);
   assert.equal(cards.find((card) => card.id === 'claude').installed, false);
-  assert.equal(cards.find((card) => card.id === 'gemini').installed, null);
+  assert.equal(cards.find((card) => card.id === 'copilot').installed, null);
   assert.ok(cards.every((card) => card.usageStatus === 'unknown' && card.remaining === null));
 });
 

@@ -94,9 +94,15 @@ Add it to `ALL` in `harness/mod.rs`. Optionally drop a logo at `src/logos/<id>.s
   - Models: aliases documented in `claude --help`, plus `model`, `availableModels` and the model env vars in its settings and environment. There is no hardcoded list; the Models tab also adds models seen in local history.
   - Quota comes from its `rate_limit_event` (5-hour and weekly windows). Noai caches it in `claude-limits.json`. When the cache is older than 10 minutes, it refreshes with a tiny Haiku call using no tools and `--no-session-persistence`.
   - Transcripts live in `~/.claude/projects`. Subagents are in `<session>/subagents/agent-*.jsonl` and are folded into their parent session.
-- **Other providers:** OpenRouter reads `OPENROUTER_API_KEY`. Gemini, Copilot and Cursor have no usage adapter; the user can set a plan label by hand.
+- **Gemini CLI:**
+  - Runs as `gemini -p "" --output-format stream-json --skip-trust --approval-mode …`, with the prompt on stdin. `--skip-trust` is needed because headless runs refuse folders the user hasn't trusted in Gemini, so the project's own `.gemini` settings apply.
+  - Replies stream as `delta` chunks; the harness buffers them per run and emits whole paragraphs at each tool call and at the result.
+  - Models come from `gemini models --output-format json`, plus `model.name` in `~/.gemini/settings.json` and `GEMINI_MODEL`.
+  - `result.stats.models` gives per-run tokens per model; `input_tokens` includes `cached`. No account usage or limits are reported.
+  - Transcripts live in `~/.gemini/tmp/<project>/chats/session-*.jsonl`. A reply line is rewritten as its tool calls finish, so it's keyed by its `id`; thinking tokens count as output.
+- **Other providers:** OpenRouter reads `OPENROUTER_API_KEY`. Copilot and Cursor have no usage adapter; the user can set a plan label by hand.
 - **Metrics importer:**
-  - Scans `~/.codex/sessions`, `~/.codex/archived_sessions` and `~/.claude/projects`, honouring `CODEX_HOME` and `CLAUDE_CONFIG_DIR`.
+  - Scans `~/.codex/sessions`, `~/.codex/archived_sessions`, `~/.claude/projects` and `~/.gemini/tmp`, honouring `CODEX_HOME` and `CLAUDE_CONFIG_DIR`.
   - Reads everything once, then reads only appended bytes every 30 seconds.
   - Repeated Claude message snapshots and Codex running totals are counted once.
   - It never modifies agent logs.
@@ -113,13 +119,16 @@ Add it to `ALL` in `harness/mod.rs`. Optionally drop a logo at `src/logos/<id>.s
 | Codex | `provider-default` | Existing CLI settings |
 | Claude | `auto-review` (new-job default) | Provider's automatic permission review |
 | Claude | `provider-default` | Configured rules with `dontAsk` |
+| Gemini | `workspace-write` (new-job default) | `auto_edit`: file edits, no shell (tools needing approval are unavailable headless) |
+| Gemini | `read-only` | `plan` mode |
+| Gemini | `provider-default` | `default`: the CLI's own settings and policies |
 
 - **Where modes apply:**
-  - Chats and older jobs keep their existing behaviour: Codex uses the CLI config, Claude uses `dontAsk`.
+  - Chats and older jobs keep their existing behaviour: Codex uses the CLI config, Claude uses `dontAsk`, Gemini uses `default`.
   - Each job and run saves its mode, including timed resumes. Existing jobs are never migrated.
 - **Bypass** (`--dangerously-bypass-permissions true`, or the checkbox):
   - It is a separate opt-in that is off by default.
-  - It sends `--dangerously-bypass-approvals-and-sandbox` to Codex or `--dangerously-skip-permissions` to Claude.
+  - It sends `--dangerously-bypass-approvals-and-sandbox` to Codex, `--dangerously-skip-permissions` to Claude or `--approval-mode yolo` to Gemini.
   - Use it only when the user has explicitly authorised it for that task.
   - Noai never falls back to bypass.
 
@@ -141,7 +150,7 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 ```
 
 - **Options:**
-  - `--harness codex|claude` (Codex is the default) and `--model ID`.
+  - `--harness codex|claude|gemini` (Codex is the default) and `--model ID`.
   - `--project` names an existing folder. Leave it out and Noai creates a UUID workspace in `~/.noai`.
   - `--at` takes `now` or a future ISO-8601 time with a timezone.
   - `--every` takes values like `90s`, `30m`, `2h` or `1d`, with a 60-second minimum.
@@ -175,7 +184,7 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 - **Unattended instructions:** every scheduled run gets `unattended-job.md` prepended. Restart an idle daemon after changing that file.
 - **Daily digest:**
   - The user can type their own instructions in the Digest tab. Left blank, the default groups the day's jobs and sessions into categories with a plain-English explanation each, `#session=` links, usage and suggestions (`digest.rs`). Its fixed rules (no invented data or links, no tools) always apply.
-  - Runs read-only (Codex `read-only`, Claude `dontAsk`) in `~/.noai/digest` on a fixed 24-hour interval.
+  - Runs read-only (Codex `read-only`, Claude `dontAsk`, Gemini `plan`) in `~/.noai/digest` on a fixed 24-hour interval.
   - It is hidden from the Jobs list.
 
 ## Background service

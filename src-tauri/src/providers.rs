@@ -155,11 +155,6 @@ pub async fn get_provider_usage() -> Vec<ProviderUsageSnapshot> {
     }
     snapshots.extend([
         unavailable(
-            "gemini",
-            "Gemini CLI",
-            "This CLI does not expose verified account usage to Noai.",
-        ),
-        unavailable(
             "copilot",
             "GitHub Copilot",
             "Verified account usage is not available.",
