@@ -129,7 +129,7 @@ impl Harness for Gemini {
         let snapshot = unavailable(
             self.id(),
             self.label(),
-            "Gemini CLI doesn't report account usage or limits to Noai.",
+            "Gemini CLI doesn't include account usage or limits in its headless output. See your limits in Google AI Studio.",
         );
         Box::pin(async move { snapshot })
     }

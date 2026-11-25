@@ -311,9 +311,15 @@ pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Opt
     {
         return None;
     }
-    let relative = ["retry after ", "try again in ", "resets in ", "reset in "]
-        .iter()
-        .find_map(|needle| lower.find(needle).map(|index| index + needle.len()));
+    let relative = [
+        "retry after ",
+        "retry in ",
+        "try again in ",
+        "resets in ",
+        "reset in ",
+    ]
+    .iter()
+    .find_map(|needle| lower.find(needle).map(|index| index + needle.len()));
     let reset = if let Some(marker) = relative {
         let seconds = parse_duration_seconds(&lower[marker..])?;
         if seconds == 0 || seconds > 8 * 24 * 3600 {
@@ -387,9 +393,10 @@ pub fn classify_structured_quota(
     Some((reset, format!("{harness} timed usage limit")))
 }
 
+/// "2h 30m", "45 seconds", "41.2s" or "800ms", rounded up to whole seconds.
 fn parse_duration_seconds(input: &str) -> Option<u64> {
     let mut rest = input.trim_start();
-    let mut total = 0u64;
+    let mut total_ms = 0u64;
     let mut found = false;
     for _ in 0..3 {
         let count = rest.bytes().take_while(u8::is_ascii_digit).count();
@@ -397,41 +404,58 @@ fn parse_duration_seconds(input: &str) -> Option<u64> {
             break;
         }
         let amount: u64 = rest[..count].parse().ok()?;
-        rest = rest[count..].trim_start();
-        let (unit, size) = if rest.starts_with("hours") {
-            (3600, 5)
+        rest = &rest[count..];
+        // A decimal part, as in Gemini's "Please retry in 41.2s".
+        let mut fraction = (0u64, 1u64);
+        if let Some(after) = rest.strip_prefix('.') {
+            let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+            if digits == 0 {
+                return None;
+            }
+            let kept = digits.min(6);
+            fraction = (after[..kept].parse().ok()?, 10u64.pow(kept as u32));
+            rest = &after[digits..];
+        }
+        rest = rest.trim_start();
+        let (unit_ms, size) = if rest.starts_with("hours") {
+            (3_600_000, 5)
         } else if rest.starts_with("hour") {
-            (3600, 4)
+            (3_600_000, 4)
         } else if rest.starts_with('h') {
-            (3600, 1)
+            (3_600_000, 1)
+        } else if rest.starts_with("ms") {
+            (1, 2)
         } else if rest.starts_with("minutes") {
-            (60, 7)
+            (60_000, 7)
         } else if rest.starts_with("minute") {
-            (60, 6)
+            (60_000, 6)
         } else if rest.starts_with("mins") {
-            (60, 4)
+            (60_000, 4)
         } else if rest.starts_with("min") {
-            (60, 3)
+            (60_000, 3)
         } else if rest.starts_with('m') {
-            (60, 1)
+            (60_000, 1)
         } else if rest.starts_with("seconds") {
-            (1, 7)
+            (1000, 7)
         } else if rest.starts_with("second") {
-            (1, 6)
+            (1000, 6)
         } else if rest.starts_with("secs") {
-            (1, 4)
+            (1000, 4)
         } else if rest.starts_with("sec") {
-            (1, 3)
+            (1000, 3)
         } else if rest.starts_with('s') {
-            (1, 1)
+            (1000, 1)
         } else {
             return None;
         };
-        total = total.checked_add(amount.checked_mul(unit)?)?;
+        let part = amount
+            .checked_mul(unit_ms)?
+            .checked_add((fraction.0.checked_mul(unit_ms)?).div_ceil(fraction.1))?;
+        total_ms = total_ms.checked_add(part)?;
         rest = rest[size..].trim_start();
         found = true;
     }
-    found.then_some(total)
+    found.then_some(total_ms.div_ceil(1000))
 }
 
 #[cfg(test)]
@@ -715,6 +739,31 @@ mod tests {
             classify_timed_quota("claude", "rate_limit_error retry after 45 seconds", 100),
             Some((145, "claude timed usage limit".into()))
         );
+        // Gemini: fractional seconds round up; milliseconds aren't minutes.
+        assert_eq!(
+            classify_timed_quota(
+                "gemini",
+                "[API Error: You exceeded your current quota, please check your plan and billing details. Please retry in 41.2s.]",
+                100
+            ),
+            None,
+            "billing wording means the user must look"
+        );
+        assert_eq!(
+            classify_timed_quota(
+                "gemini",
+                "Quota exceeded for metric generate_content_free_tier_requests. Please retry in 41.2s.",
+                100
+            ),
+            Some((142, "gemini timed usage limit".into()))
+        );
+        assert_eq!(
+            classify_timed_quota("gemini", "Rate limit hit. Please retry in 800ms", 100),
+            Some((101, "gemini timed usage limit".into()))
+        );
+        assert_eq!(parse_duration_seconds("1.5h"), Some(5400));
+        assert_eq!(parse_duration_seconds("2h 30m"), Some(9000));
+        assert_eq!(parse_duration_seconds("41.s"), None);
         assert!(
             classify_timed_quota("codex", "Billing quota reached. Retry after 1h", 100).is_none()
         );
