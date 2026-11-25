@@ -396,6 +396,63 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     return nav;
   }
 
+  // Small icon buttons for a table row: the same actions as the job page, in a fixed width.
+  const TOOL_ICONS = {
+    pause: ['M9 6v12', 'M15 6v12'],
+    resume: ['M8 5.5v13l10.5-6.5z'],
+    retry: ['M4 12a8 8 0 0 1 13.7-5.6L20 8', 'M20 3v5h-5', 'M20 12a8 8 0 0 1-13.7 5.6L4 16', 'M4 21v-5h5'],
+    edit: ['M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z', 'M13.5 6.5l4 4'],
+    cancel: ['M6 6l12 12', 'M18 6L6 18'],
+    confirm: ['M5 12.5l4.5 4.5L19 7.5'],
+  };
+  function toolButton(kind, label, action, tone = '') {
+    const node = element('button', `job-tool${tone ? ` is-${tone}` : ''}`);
+    node.type = 'button';
+    node.setAttribute('aria-label', label);
+    node.title = label;
+    const draw = name => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+      for (const d of TOOL_ICONS[name]) { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path); }
+      node.replaceChildren(svg);
+    };
+    draw(kind);
+    node.redraw = draw;
+    node.addEventListener('click', event => { event.stopPropagation(); action(node); });
+    return node;
+  }
+  function rowActions(task) {
+    const nodes = [];
+    if (task.status === 'paused' && resume) nodes.push(toolButton('resume', 'Resume', () => act('resume the job', () => resume(task.id), 'Job resumed.')));
+    if (task.status === 'scheduled' && pause) nodes.push(toolButton('pause', 'Pause', () => act('pause the job', () => pause(task.id), 'Job paused. It won’t start again until you resume it.')));
+    if (retry && ['needs_attention', 'failed', 'cancelled'].includes(task.status)) {
+      nodes.push(toolButton('retry', task.status === 'cancelled' ? 'Restart' : 'Retry', async node => {
+        node.disabled = true;
+        try {
+          const updated = await retry(task.id, Math.floor(Date.now()/1000) + 60, task.lastRunId || null);
+          toast(`Retry scheduled for ${formatScheduledTime(updated.nextRunAt)}${updated.pendingResumeId ? ' · continuing the saved conversation' : ''}.`);
+          await refresh();
+        } catch (error) { toast(`Could not retry job: ${String(error)}`, 'error'); await refresh(); }
+        finally { if (node.isConnected) node.disabled = false; }
+      }));
+    }
+    if (canEdit(task)) nodes.push(toolButton('edit', 'Edit', () => void beginEdit(task)));
+    if (['scheduled', 'running', 'waiting', 'needs_attention', 'paused', 'failed'].includes(task.status) && !(task.status === 'failed' && !task.intervalSeconds)) {
+      // Two taps: the first asks, the second cancels.
+      nodes.push(toolButton('cancel', 'Cancel job', async node => {
+        if (!node.classList.contains('is-confirming')) {
+          node.classList.add('is-confirming'); node.redraw('confirm');
+          node.setAttribute('aria-label', 'Confirm cancel'); node.title = 'Click again to cancel this job';
+          setTimeout(() => { if (node.isConnected) { node.classList.remove('is-confirming'); node.redraw('cancel'); node.setAttribute('aria-label', 'Cancel job'); node.title = 'Cancel job'; } }, 4000);
+          return;
+        }
+        node.disabled = true;
+        await act('cancel the job', () => cancel(task.id), 'Job cancelled.');
+      }, 'danger'));
+    }
+    return nodes;
+  }
+
   function retryButton(task) {
     if (!retry || !['needs_attention', 'failed', 'cancelled'].includes(task.status)) return null;
     return button(task.status === 'cancelled' ? 'Restart' : 'Retry', async event => {
@@ -710,7 +767,11 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
       : [name, cell(historyBars(stats, task)), cell(rate, 'is-number'), cell(seconds(stats.typical), 'is-number'), cell(stats.tokens ? compactNumber(stats.tokens) : '—', 'is-number'), cell(state)];
     row.append(...cells);
     const actions = element('td', 'job-table-actions');
-    if (!completedRun && native) actions.append(...jobActions(task, { compact: true }));
+    if (!completedRun && native) {
+      const group = element('div', 'job-row-tools');
+      group.append(...rowActions(task));
+      actions.append(group);
+    }
     row.append(actions);
     return row;
   }
