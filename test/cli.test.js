@@ -243,3 +243,11 @@ test('create previews and retries reject impossible calendar dates before contac
     assert.throws(() => parse(['jobs','retry','fixture','--at',at]), /calendar/);
   }
 });
+
+test('limits shows every light and sets one agent', () => {
+  assert.deepEqual(parse(['limits']).request, { command: 'get_rate_gates' });
+  assert.deepEqual(parse(['limits', 'stop', 'gemini']).request, { command: 'set_rate_gate', harness: 'gemini', light: 'stop' });
+  assert.deepEqual(parse(['limits', 'go', 'claude', '--socket', '/s']), { socketPath: '/s', request: { command: 'set_rate_gate', harness: 'claude', light: 'go' } });
+  assert.throws(() => parse(['limits', 'wait', 'codex']), /go\|stop/);
+  assert.throws(() => parse(['limits', 'go']), /go\|stop/);
+});

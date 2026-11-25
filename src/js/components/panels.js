@@ -12,7 +12,41 @@ function resetLabel(at) {
 
 // Connected agents get a panel with Activity-style rings for each usage window;
 // everything else is one compact row in a grouped list.
-export function renderAccounts(container, runtime, native, snapshots = [], manualPlans = {}, editPlan = () => {}) {
+/**
+ * Go / Wait / Stop for one agent: a pill plus the button that flips it.
+ * Wait ends on its own; Stop waits for you (or a run that succeeds).
+ */
+function gateControls(harness, gate, changeGate) {
+  const light = gate?.light || 'go';
+  const until = gate?.until ? new Date(gate.until * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+  const [text, tone] = light === 'stop' ? ['Stop', 'bad'] : light === 'wait' ? [until ? `Wait · until ${until}` : 'Wait', 'warn'] : ['Go', 'good'];
+  const badge = pill(text, tone);
+  badge.title = light === 'go' ? 'Jobs for this agent start as scheduled.' : gate.reason || '';
+  const button = element('button', 'text-button gate-button', light === 'go' ? 'Stop jobs' : 'Go now');
+  button.type = 'button';
+  button.title = light === 'go' ? 'Hold this agent\u2019s scheduled jobs until you press Go. Chats still run.' : 'Let this agent\u2019s jobs start now.';
+  button.addEventListener('click', () => changeGate(harness, light === 'go' ? 'stop' : 'go'));
+  const wrap = element('span', 'gate-controls');
+  wrap.append(badge, button);
+  return wrap;
+}
+
+function gateNote(gate) {
+  if (!gate || gate.light === 'go' || !gate.reason) return null;
+  return element('p', 'gate-note', gate.light === 'wait' ? `Jobs are waiting: ${gate.reason}` : `Jobs are stopped: ${gate.reason}`);
+}
+
+/** The account's status pill, or a "Needs attention" button that opens its setup steps. */
+function statusBadge(status, snapshot, label, openSetup) {
+  if (!snapshot?.setup) return pill(status[0], status[1]);
+  const button = element('button', 'ui-pill is-warn is-button', 'Needs attention');
+  button.type = 'button';
+  button.title = `Show what ${label} needs`;
+  button.addEventListener('click', () => openSetup(label, snapshot.setup));
+  return button;
+}
+
+export function renderAccounts(container, runtime, native, snapshots = [], manualPlans = {}, editPlan = () => {}, gates = {}, changeGate = () => {}, openSetup = () => {}) {
   const fragment = document.createDocumentFragment();
   const panels = element('div', 'account-panels');
   const others = [];
@@ -26,8 +60,10 @@ export function renderAccounts(container, runtime, native, snapshots = [], manua
     const planButton = element('button', 'text-button plan-button', manual ? 'Edit plan label' : 'Set plan label');
     planButton.type = 'button';
     planButton.addEventListener('click', () => editPlan(provider.id, provider.label));
+    const gate = native && ready ? gateControls(provider.harness, gates[provider.harness], changeGate) : null;
     if (!available && !snapshot?.windows?.length) {
-      const item = row({ leading: agentTile(provider.id, provider.label), title: provider.label, subtitle: plan || snapshot?.detail || (native ? (ready ? 'Installed · usage not reported by this agent' : 'Not installed on this computer') : 'Open the desktop app to check this account'), trailing: [pill(status[0], status[1]), planButton] });
+      const note = gateNote(gates[provider.harness]);
+      const item = row({ leading: agentTile(provider.id, provider.label), title: provider.label, subtitle: [plan || snapshot?.detail || (native ? (ready ? 'Installed · usage not reported by this agent' : 'Not installed on this computer') : 'Open the desktop app to check this account'), note?.textContent].filter(Boolean).join(' · '), trailing: [gate, statusBadge(status, snapshot, provider.label, openSetup), planButton] });
       item.classList.add('account-card');
       others.push(item);
       continue;
@@ -36,8 +72,10 @@ export function renderAccounts(container, runtime, native, snapshots = [], manua
     const header = element('div', 'account-panel-header');
     const name = element('div', 'account-panel-name');
     name.append(element('h3', '', provider.label), element('p', '', [snapshot?.accountLabel, plan].filter(Boolean).join(' · ') || 'Account not reported'));
-    header.append(agentTile(provider.id, provider.label, 'is-large'), name, pill(status[0], status[1]));
+    header.append(agentTile(provider.id, provider.label, 'is-large'), name, ...(gate ? [gate] : []), statusBadge(status, snapshot, provider.label, openSetup));
     card.append(header);
+    const note = gateNote(gates[provider.harness]);
+    if (note) card.append(note);
     const gauges = element('div', 'account-gauges');
     for (const window of snapshot?.windows || []) {
       const gauge = element('div', 'account-gauge');
@@ -65,7 +103,7 @@ export function renderAccounts(container, runtime, native, snapshots = [], manua
   if (panels.childElementCount) fragment.append(panels);
   if (others.length) fragment.append(group(panels.childElementCount ? 'Other agents and services' : 'Agents and services', others));
   fragment.append(element('p', 'ui-footnote', native
-    ? 'Noai reuses each CLI’s own sign-in. Quotas that a provider doesn’t report are never estimated.'
+    ? 'Noai reuses each CLI’s own sign-in. Quotas that a provider doesn’t report are never estimated. Go / Wait / Stop: when an agent hits a limit, its jobs wait for the reset (or stop if no reset time is given) instead of failing one after another.'
     : 'Browser preview · Open the Noai desktop app to detect your installed coding agents.'));
   container.replaceChildren(fragment);
 }

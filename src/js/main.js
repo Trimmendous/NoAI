@@ -4,7 +4,7 @@ import { initActivityMetrics } from './components/activity-metrics.js';
 import { createStore, createInitialWorkspace, createConversation, createMessage } from './core/state.js';
 import { HARNESSES, getHarness, preferredHarness, harnessOptionLabel, setHarnesses } from './core/catalog.js';
 import { initTheme } from './core/theme.js';
-import { isNative, runtimeStatus, chooseProject, startRun, cancelRun, listenRunEvents, providerUsage, resumeJobs, cancelResumeJob, setBackgroundMode, harnessModels, ensureProject, listScheduledTasks, createScheduledTask, cancelScheduledTask, getScheduledTaskRuns, listenScheduledTasks, connectEvents, activeRuns, activityMetrics } from './services/bridge.js';
+import { isNative, runtimeStatus, chooseProject, startRun, cancelRun, listenRunEvents, providerUsage, resumeJobs, cancelResumeJob, setBackgroundMode, harnessModels, ensureProject, listScheduledTasks, createScheduledTask, cancelScheduledTask, getScheduledTaskRuns, listenScheduledTasks, connectEvents, activeRuns, activityMetrics, getRateGates, setRateGate } from './services/bridge.js';
 import { loadInitialWorkspace, createWorkspacePersistence } from './services/workspace.js';
 import { basename, element, toast } from './components/dom.js';
 import { createMessageRenderer } from './components/messages.js';
@@ -59,6 +59,7 @@ let modelSignature = '';
 let editAction;
 let persistenceAvailable = true;
 let usage = [];
+let gates = {};
 let jobs = [];
 let checkingUsage = false;
 let checkingJobs = false;
@@ -278,7 +279,7 @@ function render() {
   renderMessages(conversation);
   renderModelOptions();
   updateComposer();
-  if (view === 'accounts') renderAccounts($('#account-list'), runtime, native, usage, state.preferences.manualPlans, openPlanLabel);
+  if (view === 'accounts') renderAccounts($('#account-list'), runtime, native, usage, state.preferences.manualPlans, openPlanLabel, gates, changeGate, openSetup);
   if (view === 'activity') {
     renderActivity($('#activity-list'), state, activity);
     renderJobs($('#resume-list'), jobs, stopJob);
@@ -340,9 +341,28 @@ async function refreshUsage() {
   if (checkingUsage || !native) return;
   checkingUsage = true;
   $('#refresh-accounts').disabled = true;
-  try { usage = await providerUsage(); lastUsageCheck = Date.now(); plans?.render(usage); }
+  try {
+    [usage, gates] = await Promise.all([providerUsage(), getRateGates().catch(() => gates)]);
+    lastUsageCheck = Date.now(); plans?.render(usage);
+  }
   catch (error) { toast(`Could not refresh usage: ${String(error)}`, 'error'); }
   finally { checkingUsage = false; $('#refresh-accounts').disabled = false; render(); }
+}
+
+// Go / Stop for one agent's jobs. Go also starts the jobs its light was holding.
+async function changeGate(harness, light) {
+  const label = getHarness(harness)?.label || harness;
+  if (light === 'stop' && !await confirmAction({
+    title: `Stop ${label} jobs?`,
+    description: `Scheduled jobs for ${label} won’t start until you press Go. Jobs already running finish normally, and chats still work.`,
+    confirm: 'Stop jobs',
+  })) return;
+  try {
+    await setRateGate(harness, light);
+    gates = await getRateGates();
+    if (light === 'go') void refreshJobs();
+  } catch (error) { toast(`Could not change ${harness}: ${String(error)}`, 'error'); }
+  render();
 }
 
 async function stopJob(jobId) {
@@ -816,6 +836,63 @@ $('#background-mode-setting').addEventListener('change', async event => {
 $('[data-action="toggle-sidebar"]').addEventListener('click', () => setSidebar(!document.body.classList.contains('sidebar-open')));
 $('#sidebar-toggle').addEventListener('click', () => setSidebar(false));
 $('#refresh-accounts').addEventListener('click', async () => { await refreshRuntime(); await refreshUsage(); void loadModels(active()?.harness || defaultHarness); });
+
+/** A yes/no window. Resolves true only when the user confirms. */
+function confirmAction({ title, description, confirm = 'Confirm' }) {
+  const dialog = $('#confirm-dialog');
+  $('#confirm-title').textContent = title;
+  $('#confirm-description').textContent = description;
+  $('#confirm-ok').textContent = confirm;
+  return new Promise(resolve => {
+    const finish = (answer) => { dialog.removeEventListener('close', onClose); if (dialog.open) dialog.close(); resolve(answer); };
+    const onClose = () => finish(false);
+    dialog.addEventListener('close', onClose);
+    $('#confirm-ok').onclick = (event) => { event.preventDefault(); finish(true); };
+    $('#confirm-cancel').onclick = () => finish(false);
+    dialog.showModal();
+  });
+}
+
+// "Needs attention": the account's setup steps, with copyable commands and a Check again button.
+let setupFor = null;
+function drawSetup(label, setup) {
+  $('#setup-title').textContent = setup.title;
+  $('#setup-agent').textContent = label;
+  $('#setup-summary').textContent = setup.summary;
+  $('#setup-steps').replaceChildren(...setup.steps.map(step => {
+    const item = element('li', '', step.text);
+    if (step.command) {
+      const line = element('div', 'setup-command');
+      const copy = element('button', 'setup-copy', 'Copy');
+      copy.type = 'button';
+      copy.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(step.command); copy.textContent = 'Copied'; }
+        catch { copy.textContent = 'Copy unavailable'; }
+        setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+      });
+      line.append(element('code', '', step.command), copy);
+      item.append(line);
+    }
+    return item;
+  }));
+}
+function openSetup(label, setup) {
+  setupFor = label;
+  drawSetup(label, setup);
+  if (!$('#setup-dialog').open) $('#setup-dialog').showModal();
+}
+$('#setup-close').addEventListener('click', () => $('#setup-dialog').close());
+$('#setup-done').addEventListener('click', () => $('#setup-dialog').close());
+$('#setup-check').addEventListener('click', async () => {
+  const button = $('#setup-check');
+  button.disabled = true; button.textContent = 'Checking…';
+  try {
+    await refreshUsage();
+    const snapshot = usage.find(item => item.label === setupFor);
+    if (snapshot?.setup) { drawSetup(setupFor, snapshot.setup); toast('Not quite yet. The next step is shown.', 'info'); }
+    else { $('#setup-dialog').close(); toast(`${setupFor} is set up.`, 'info'); }
+  } finally { button.disabled = false; button.textContent = 'Check again'; }
+});
 
 function openPlanLabel(id, label) {
   editAction = { action: 'plan', id };

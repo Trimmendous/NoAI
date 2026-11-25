@@ -39,6 +39,8 @@ pub struct Engine {
     pub scheduled_tasks: ScheduledTasks,
     pub active_runs: ActiveRuns,
     pub launch_gate: LaunchGate,
+    /// Go / Wait / Stop per agent: whether its jobs may start.
+    pub rate_gates: crate::rate_gate::RateGates,
     pub home: PathBuf,
     pub event_sink: Arc<dyn Fn(EngineEvent) + Send + Sync>,
 }
@@ -54,6 +56,7 @@ impl Engine {
             scheduled_tasks: ScheduledTasks::open_in_dir(app_data_dir)?,
             active_runs: ActiveRuns::default(),
             launch_gate: LaunchGate::default(),
+            rate_gates: crate::rate_gate::RateGates::open_in_dir(app_data_dir),
             home,
             event_sink,
         }))
@@ -113,6 +116,10 @@ pub async fn start_run(engine: Arc<Engine>, mut request: RunRequest) -> Result<(
     request.project_path =
         crate::projects::ensure_project_path(Some(request.project_path.clone()), &engine.home)?;
     let mut cancel_rx = reserve_run(&engine, &request, None)?;
+    // Chats aren't held (you're here to decide), but you hear about a red or amber light.
+    if let Some(warning) = gate_warning(&engine, &request.harness) {
+        engine.emit_run(RunEvent::new(&request, "notice", Some(warning)));
+    }
     let fingerprint = if request.auto_resume {
         tokio::select! {
             biased;
@@ -804,6 +811,12 @@ async fn finish_run(
     }) {
         terminal = RunEvent::new(request, "done", Some("Cancelled".into()));
     }
+    observe_limits(
+        engine,
+        request,
+        &terminal,
+        outcome.structured_retry.as_ref(),
+    );
     if terminal.kind == "error" && request.auto_resume {
         let text_quota = terminal.text.as_deref().and_then(|message| {
             adapters::classify_timed_quota(&request.harness, message, scheduler::now_epoch())
@@ -1330,6 +1343,155 @@ pub fn review_change(
     Ok(serde_json::json!({ "worktree": tree, "url": url }))
 }
 
+/// Updates the agent's Go / Wait / Stop light from how a run ended, and tells
+/// you when it turns amber or red.
+fn observe_limits(
+    engine: &Arc<Engine>,
+    request: &RunRequest,
+    terminal: &RunEvent,
+    structured_retry: Option<&(u64, String)>,
+) {
+    use crate::rate_gate::Signal;
+    let now = scheduler::now_epoch();
+    let signal = match terminal.kind {
+        "done" if terminal.text.as_deref() != Some("Cancelled") => Signal::Ok,
+        "error" => {
+            let from_text = terminal
+                .text
+                .as_deref()
+                .and_then(|message| adapters::limit_signal(&request.harness, message, now));
+            match (from_text, structured_retry) {
+                // A structured reset is the most precise; keep the later one.
+                (Some(Signal::Timed { reset, reason }), Some((at, _))) => Signal::Timed {
+                    reset: reset.max(*at),
+                    reason,
+                },
+                (Some(signal), _) => signal,
+                (None, Some((at, reason))) => Signal::Timed {
+                    reset: *at,
+                    reason: reason.clone(),
+                },
+                (None, None) => return,
+            }
+        }
+        _ => return,
+    };
+    let Some(gate) = engine.rate_gates.observe(&request.harness, signal, now) else {
+        return;
+    };
+    let label = crate::harness::get(&request.harness).map_or("An agent", |agent| agent.label());
+    let message = match gate.light {
+        crate::rate_gate::Light::Go => return,
+        crate::rate_gate::Light::Wait => format!(
+            "{label} hit a limit. Its jobs wait until it resets{}.",
+            gate.until.map(clock_text).unwrap_or_default()
+        ),
+        crate::rate_gate::Light::Stop => {
+            format!(
+                "{label} hit a limit with no reset time. Its jobs are stopped until you press Go."
+            )
+        }
+    };
+    if engine.scheduled_tasks.automation().notify_limits {
+        crate::platform::notify(&message, &gate.reason);
+    }
+}
+
+/// " at 3:10 PM" in the computer's own timezone.
+fn clock_text(epoch: u64) -> String {
+    chrono::DateTime::from_timestamp(epoch as i64, 0)
+        .map(|at| {
+            format!(
+                " at {}",
+                at.with_timezone(&chrono::Local).format("%-I:%M %p")
+            )
+        })
+        .unwrap_or_default()
+}
+
+/// Until when, and why, the agent's light holds a due job. `None` on Go.
+fn gate_hold(engine: &Arc<Engine>, harness: &str) -> Option<(u64, String)> {
+    use crate::rate_gate::{Light, STOP_PREFIX, STOP_RECHECK_SECONDS, WAIT_PREFIX};
+    let now = scheduler::now_epoch();
+    let gate = engine.rate_gates.get(harness, now);
+    match gate.light {
+        Light::Go => None,
+        Light::Wait => {
+            let until = gate.until.unwrap_or(now + STOP_RECHECK_SECONDS);
+            Some((
+                until,
+                format!(
+                    "{WAIT_PREFIX} the agent hit a limit and resets{}. {}",
+                    clock_text(until),
+                    gate.reason
+                ),
+            ))
+        }
+        Light::Stop => Some((
+            now + STOP_RECHECK_SECONDS,
+            format!(
+                "{STOP_PREFIX} {} Press Go on the Accounts page to start it.",
+                gate.reason
+            ),
+        )),
+    }
+}
+
+/// The warning a chat gets when its agent isn't on Go.
+fn gate_warning(engine: &Arc<Engine>, harness: &str) -> Option<String> {
+    use crate::rate_gate::Light;
+    let gate = engine.rate_gates.get(harness, scheduler::now_epoch());
+    let label = crate::harness::get(harness).map_or("This agent", |agent| agent.label());
+    match gate.light {
+        Light::Go => None,
+        Light::Wait => Some(format!(
+            "{label} hit a limit and resets{}. This message may fail until then.",
+            gate.until.map(clock_text).unwrap_or_default()
+        )),
+        Light::Stop => Some(format!(
+            "{label}'s jobs are stopped: {} Chats still run.",
+            gate.reason
+        )),
+    }
+}
+
+/// Every agent's light, for the Accounts page and the CLI.
+pub fn rate_gates(engine: Arc<Engine>) -> serde_json::Value {
+    let now = scheduler::now_epoch();
+    let agents: Vec<_> = crate::harness::all()
+        .iter()
+        .map(|agent| agent.id())
+        .collect();
+    serde_json::to_value(engine.rate_gates.all(&agents, now)).unwrap_or_default()
+}
+
+/// You pressed Go or Stop for an agent. Go also starts its held jobs now.
+pub fn set_rate_gate(
+    engine: Arc<Engine>,
+    harness: &str,
+    light: &str,
+) -> Result<serde_json::Value, String> {
+    use crate::rate_gate::{Light, STOP_PREFIX, WAIT_PREFIX};
+    crate::harness::require(harness)?;
+    let light = match light {
+        "go" => Light::Go,
+        "stop" => Light::Stop,
+        other => return Err(format!("Unknown light: {other} (use go or stop)")),
+    };
+    let now = scheduler::now_epoch();
+    let gate = engine.rate_gates.set_manual(harness, light, now)?;
+    if light == Light::Go {
+        for task in
+            engine
+                .scheduled_tasks
+                .release_held(harness, &[WAIT_PREFIX, STOP_PREFIX], now)?
+        {
+            engine.emit_task(task);
+        }
+    }
+    serde_json::to_value(gate).map_err(|error| error.to_string())
+}
+
 async fn run_scheduled_due(engine: &Arc<Engine>) {
     let claims = match engine.scheduled_tasks.claim_due(scheduler::now_epoch()) {
         Ok(claims) => claims,
@@ -1350,33 +1512,60 @@ async fn run_scheduled_due(engine: &Arc<Engine>) {
                 scheduler::now_epoch(),
             );
         }
-        // Usage budget: hold the job until its agent's limits leave you your share.
         let automation = engine.scheduled_tasks.automation();
-        if let Some(reserve) = automation.reserve_percent {
-            let stop_at = f64::from(100 - reserve);
-            if let Some(hold) = budget_hold(&request.harness, stop_at).await {
-                let until = hold
-                    .resets_at
-                    .unwrap_or_else(|| scheduler::now_epoch() + 1800)
-                    + 60;
-                let reason = format!(
-                    "Held by your usage budget: {} is {}% used, and jobs stop at {}%. It starts after the limit resets.",
-                    hold.label,
-                    hold.used.round(),
-                    stop_at
-                );
-                if let Ok(Some(updated)) =
-                    engine
-                        .scheduled_tasks
-                        .defer(&request.run_id, until, &reason)
-                {
-                    if automation.notify_limits {
-                        crate::platform::notify(&format!("Job held: {}", task.title), &reason);
-                    }
-                    engine.emit_task(updated);
-                }
-                continue;
+        // Go / Wait / Stop: an agent that hit a limit holds its jobs.
+        if let Some((until, reason)) = gate_hold(engine, &request.harness) {
+            if let Ok(Some(updated)) = engine
+                .scheduled_tasks
+                .defer(&request.run_id, until, &reason)
+            {
+                engine.emit_task(updated);
             }
+            continue;
+        }
+        // Usage budget: hold the job until its agent's limits leave you your share.
+        // Without one, a window the provider reports as used up still waits for its reset.
+        let hold = if let Some(reserve) = automation.reserve_percent {
+            let stop_at = f64::from(100 - reserve);
+            budget_hold(&request.harness, stop_at).await.map(|hold| {
+                (
+                    hold.resets_at
+                        .unwrap_or_else(|| scheduler::now_epoch() + 1800)
+                        + 60,
+                    format!(
+                        "Held by your usage budget: {} is {}% used, and jobs stop at {}%. It starts after the limit resets.",
+                        hold.label,
+                        hold.used.round(),
+                        stop_at
+                    ),
+                )
+            })
+        } else {
+            // Cheap: reads what the agent already reported, never a new paid call.
+            providers::refresh_timed_limit_reset(&request.harness, scheduler::now_epoch())
+                .await
+                .map(|reset| {
+                    (
+                        scheduler::after_reset(reset),
+                        format!(
+                            "{} a usage limit is used up. It starts after it resets{}.",
+                            crate::rate_gate::WAIT_PREFIX,
+                            clock_text(reset)
+                        ),
+                    )
+                })
+        };
+        if let Some((until, reason)) = hold {
+            if let Ok(Some(updated)) = engine
+                .scheduled_tasks
+                .defer(&request.run_id, until, &reason)
+            {
+                if automation.notify_limits {
+                    crate::platform::notify(&format!("Job held: {}", task.title), &reason);
+                }
+                engine.emit_task(updated);
+            }
+            continue;
         }
         engine.emit_task(task.clone());
         // A separate git worktree for the run, so it never touches your working copy.

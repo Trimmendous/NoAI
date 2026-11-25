@@ -202,6 +202,26 @@ pub async fn set_automation(
 }
 
 #[tauri::command]
+pub async fn get_rate_gates(app: AppHandle) -> Result<Value, String> {
+    off_main(move || ipc::request(&app, json!({"command":"get_rate_gates"}))).await
+}
+
+#[tauri::command]
+pub async fn set_rate_gate(
+    app: AppHandle,
+    harness: String,
+    light: String,
+) -> Result<Value, String> {
+    off_main(move || {
+        ipc::request(
+            &app,
+            json!({"command":"set_rate_gate", "harness":harness, "light":light}),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn list_changes(app: AppHandle) -> Result<Vec<Value>, String> {
     off_main(move || ipc::request(&app, json!({"command":"list_changes"}))).await
 }

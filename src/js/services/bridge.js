@@ -146,6 +146,9 @@ export async function deletePlugin(id) { return invoke('delete_plugin', { id });
 export async function openPluginsFolder() { return invoke('open_plugins_folder'); }
 export async function getAutomation() { return isNative() ? invoke('get_automation') : { notifyFinished: true, notifyProblems: true, notifyLimits: true, reservePercent: null }; }
 export async function setAutomation(input) { return invoke('set_automation', { input }); }
+/** Go / Wait / Stop per agent: { [harness]: { light, until?, reason, manual, since } }. */
+export async function getRateGates() { return isNative() ? invoke('get_rate_gates') : {}; }
+export async function setRateGate(harness, light) { return invoke('set_rate_gate', { harness, light }); }
 export async function listChanges() { return isNative() ? invoke('list_changes') : []; }
 export async function changeDiff(runId) { return invoke('change_diff', { runId }); }
 export async function readSummary(dirs) { return isNative() ? invoke('read_summary', { dirs }) : null; }

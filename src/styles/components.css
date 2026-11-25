@@ -135,6 +135,15 @@
 /* Dialogs, in the style of a macOS sheet. */
 .model-dialog, .edit-dialog { width: min(460px, calc(100vw - 30px)); max-height: min(720px, calc(100dvh - 30px)); padding: 0; border: 0; border-radius: 14px; color: var(--ink); background: var(--surface); box-shadow: var(--raised-shadow), 0 24px 70px var(--shadow-strong); }
 .model-dialog::backdrop, .edit-dialog::backdrop { background: var(--overlay); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+/* Setup window: numbered steps, each with an optional copyable command. */
+.setup-dialog { width: min(520px, calc(100vw - 30px)); }
+.setup-steps { display: grid; gap: 14px; margin: 0; padding-left: 20px; }
+.setup-steps li { display: grid; gap: 6px; font-size: 13px; line-height: 1.45; }
+.setup-command { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 6px 6px 10px; border-radius: 8px; background: var(--fill); }
+.setup-command code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
+.setup-copy { flex: none; padding: 3px 9px; border: 0; border-radius: var(--radius-pill); color: var(--accent); background: var(--surface); font-size: 12px; font-weight: 500; cursor: pointer; }
+.setup-copy:hover { background: var(--line); }
+.setup-dialog .field-help code { font-family: var(--font-mono); }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 22px 4px; }
 .dialog-heading h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
 .dialog-body { display: grid; gap: 20px; padding: 14px 22px 22px; }

@@ -713,6 +713,31 @@ impl ScheduledTasks {
         })
     }
 
+    /// Puts an agent's jobs that its Go / Wait / Stop light held (their last
+    /// result starts with one of `prefixes`) back on the schedule now.
+    pub fn release_held(
+        &self,
+        harness: &str,
+        prefixes: &[&str],
+        now_epoch: u64,
+    ) -> Result<Vec<Task>, String> {
+        self.update(|journal| {
+            let mut released = Vec::new();
+            for task in &mut journal.tasks {
+                let held = task.status == "scheduled"
+                    && task.harness == harness
+                    && task.last_result.as_deref().is_some_and(|result| {
+                        prefixes.iter().any(|prefix| result.starts_with(prefix))
+                    });
+                if held && task.next_run_at.is_some_and(|at| at > now_epoch) {
+                    task.next_run_at = Some(now_epoch);
+                    released.push(task.clone());
+                }
+            }
+            Ok(released)
+        })
+    }
+
     pub fn instructions(&self) -> JobInstructions {
         self.journal.lock().unwrap().instructions.clone()
     }

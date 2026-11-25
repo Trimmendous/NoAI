@@ -10,7 +10,7 @@ use super::{
 };
 use crate::adapters::{find_binary, JobPermissions, RunEvent, RunRequest};
 use crate::local_metrics::{count, row, timestamp, FileState};
-use crate::providers::{unavailable, HarnessModel, ProviderUsageSnapshot};
+use crate::providers::{HarnessModel, ProviderUsageSnapshot};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::Path, process::Stdio, sync::Mutex, time::Duration};
 use tokio::{process::Command, time::timeout};
@@ -126,12 +126,12 @@ impl Harness for Gemini {
     }
 
     fn usage(&self) -> BoxFuture<ProviderUsageSnapshot> {
-        let snapshot = unavailable(
-            self.id(),
-            self.label(),
-            "Gemini CLI doesn't include account usage or limits in its headless output. See your limits in Google AI Studio.",
-        );
-        Box::pin(async move { snapshot })
+        // Gemini CLI reports no quota; Google Cloud Monitoring does, through gcloud.
+        Box::pin(super::gemini_usage::usage())
+    }
+
+    fn limit_reset(&self, message: &str, now: u64) -> Option<u64> {
+        gemini_limit_reset(message, now)
     }
 
     fn identity(&self) -> BoxFuture<Option<String>> {
@@ -325,6 +325,34 @@ fn parse_gemini(request: &RunRequest, value: &Value) -> Vec<RunEvent> {
     events
 }
 
+/// Gemini's 429s say "Please retry in 41.2s" next to billing boilerplate, and
+/// its daily quotas reset at midnight Pacific (Google's rate-limit docs).
+fn gemini_limit_reset(message: &str, now: u64) -> Option<u64> {
+    let lower = message.to_ascii_lowercase();
+    let limited = [
+        "quota",
+        "rate limit",
+        "resource_exhausted",
+        "too many requests",
+    ]
+    .iter()
+    .any(|word| lower.contains(word));
+    if !limited {
+        return None;
+    }
+    if let Some(at) = lower.find("retry in ") {
+        if let Some(seconds) =
+            crate::adapters::parse_duration_seconds(&lower[at + "retry in ".len()..])
+        {
+            return (seconds > 0).then(|| now + seconds);
+        }
+    }
+    let daily = ["daily quota", "per day", "perday"]
+        .iter()
+        .any(|word| lower.contains(word));
+    daily.then(|| super::gemini_usage::next_pacific_midnight(now))
+}
+
 /// The CLI's own model list (`gemini models -o json`). No CLI, no models.
 async fn gemini_models() -> Vec<HarnessModel> {
     let Some(binary) = find_binary("gemini") else {
@@ -505,6 +533,21 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, "error");
         assert_eq!(events[0].text.as_deref(), Some("[API Error: quota]"));
+    }
+
+    #[test]
+    fn limit_messages_give_reset_times() {
+        let now = 1_795_492_800;
+        assert_eq!(
+            gemini_limit_reset("[API Error: You exceeded your current quota, please check your plan and billing details. Please retry in 41.2s.]", now),
+            Some(now + 42)
+        );
+        assert_eq!(
+            gemini_limit_reset("You have exhausted your daily quota on this model.", now),
+            Some(1_795_507_200)
+        );
+        assert_eq!(gemini_limit_reset("Invalid API key", now), None);
+        assert_eq!(gemini_limit_reset("quota exceeded", now), None);
     }
 
     #[test]

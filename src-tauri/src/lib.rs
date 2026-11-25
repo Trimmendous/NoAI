@@ -12,6 +12,7 @@ mod platform;
 mod plugins;
 mod projects;
 mod providers;
+mod rate_gate;
 mod runtime;
 mod scheduled_tasks;
 mod scheduler;
@@ -85,6 +86,8 @@ pub fn run() {
             runtime::open_web_link,
             runtime::get_automation,
             runtime::set_automation,
+            runtime::get_rate_gates,
+            runtime::set_rate_gate,
             runtime::list_changes,
             runtime::change_diff,
             runtime::read_summary,

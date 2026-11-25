@@ -51,6 +51,7 @@ src-tauri/src/
   control.rs              Private Unix socket and durable event replay
   ipc.rs / runtime.rs     Desktop client, event relay, IPC forwarding
   providers.rs            Account identity, model discovery, usage adapters
+  rate_gate.rs            Go / Wait / Stop light per agent (holds jobs after a limit)
   scheduler.rs            Durable resume journal and event history
   scheduled_tasks.rs      User jobs and run history
   local_metrics.rs        Background importer of local agent history
@@ -99,6 +100,8 @@ Add it to `ALL` in `harness/mod.rs`. Optionally drop a logo at `src/logos/<id>.s
   - Replies stream as `delta` chunks; the harness buffers them per run and emits whole paragraphs at each tool call and at the result.
   - Models come from `gemini models --output-format json`, plus `model.name` in `~/.gemini/settings.json` and `GEMINI_MODEL`.
   - `result.stats.models` gives per-run tokens per model; `input_tokens` includes `cached`. No account usage or limits are reported.
+  - Usage comes from Google Cloud Monitoring (`harness/gemini_usage.rs`), because an API key can't read its own quota. It uses the Google Cloud CLI's sign-in: `gcloud config get-value account|project`, then `gcloud auth print-access-token` for each check. The token stays in memory for that request only and is never logged or saved. It reads `serviceruntime.googleapis.com/quota/rate/net_usage` since midnight Pacific and the `PerDay` limits from `quota/limit` (service `generativelanguage.googleapis.com`). When gcloud is missing, signed out, has no project, or Monitoring is off, the snapshot carries a `setup` guide (`providers::SetupGuide`: title, summary, steps with optional commands). The card then shows a "Needs attention" button that opens a setup window with copy buttons and Check again. Any agent's usage adapter can return a guide the same way.
+  - `limit_reset` reads Gemini's own limit messages: "Please retry in 41.2s" (its 429s mention billing as boilerplate) and daily quotas, which reset at midnight Pacific.
   - Transcripts live in `~/.gemini/tmp/<project>/chats/session-*.jsonl`. A reply line is rewritten as its tool calls finish, so it's keyed by its `id`; thinking tokens count as output.
 - **Other providers:** OpenRouter reads `OPENROUTER_API_KEY`. Copilot and Cursor have no usage adapter; the user can set a plan label by hand.
 - **Metrics importer:**
@@ -143,6 +146,8 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 ./bin/noai jobs list
 ./bin/noai jobs runs TASK_ID
 ./bin/noai jobs update-auto-resume TASK_ID true
+./bin/noai limits                  # Go / Wait / Stop light of each agent
+./bin/noai limits stop gemini      # hold an agent's jobs; `limits go gemini` releases them
 ./bin/noai jobs retry TASK_ID [--at ISO-8601]
 ./bin/noai jobs pause TASK_ID      # only a job waiting for its next run
 ./bin/noai jobs resume TASK_ID     # recurring jobs skip runs missed while paused
@@ -175,6 +180,12 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 - **Plugins:** see PLUGINS.md. The API runs over a MessageChannel port that `plugins/host.js` hands each frame once, on the SDK's hello. Plugin frames all have the origin `"null"`, so never authorise by `event.origin` or `event.source` alone. Any later load in a frame closes its port and replaces the frame. Rust side: `plugins.rs` (manifests, enabled list in `~/.noai/plugins/enabled.json`, the `noaiplugin://` file server with per-plugin CSP) and `harness/plugin_agent.rs` (agents, registered via `harness::reload_plugins`, also in the daemon via the `reload_plugins` control command). JS side: `plugins/host.js` (sandboxed iframes, permission-checked postMessage API, commands, events, themes) and the SDK in `src/plugin-sdk/`. End-to-end test: `HOME=$(mktemp -d) cargo test plugins_e2e -- --ignored`.
 - **Your plans (Dashboard):** `components/plans.js` shows each provider's usage windows with a live countdown. Window lengths come from the provider (`ProviderUsageWindow.window_seconds`: Claude's window keys like `five_hour`, Codex's `windowDurationMins`, OpenRouter's `limit_reset`), never assumed; without one, only the countdown shows. With one, a marker shows how much of the window has passed, and `windowPace` projects when the limit runs out.
 - **Worktrees and Changes:** a job with `worktree: true` runs each occurrence in its own git worktree (`worktrees.rs`, under the app data folder's `worktrees/<task>/<run>`) on a branch `noai/<job>-<date>-<id>`; a resumed run continues in the same one. When the run ends, `worktrees::finish` commits whatever is uncommitted and counts the diff; no changes means it's cleaned up at once. Runs with `review: "pending"` show on the Changes page (`components/changes.js`), where merge (main folder must be clean and on the original branch; conflicts abort), publish (push, then `gh pr create` or the host's compare page) and discard go through the daemon (`review_change`). Not a git repo: the run works in the folder and says so. Noai's own git calls run outside the agent sandbox, so `worktrees::git` turns off repo hooks and `core.fsmonitor`. Only Publish's push keeps hooks, because Git LFS uploads from pre-push.
+- **Go / Wait / Stop (`rate_gate.rs`):** one light per agent, owned by the daemon and saved in `rate-gates.json`.
+  - `finish_run` calls `observe_limits`. A limit error with a reset time (`adapters::limit_signal`, which includes the harness's `limit_reset` hook and structured resets) turns the light to Wait until then. A limit with no reset time, or a credits/spend problem, turns it to Stop. Any successful run turns it back to Go. Authentication errors don't change it.
+  - `run_scheduled_due` checks the light before the budget. Wait defers the claimed run to the reset; Stop defers it by 15 minutes at a time. The held job's `lastResult` starts with `Waiting:` or `Stopped:`.
+  - Without a budget, a usage window the agent reports as used up (`exhausted_reset`, which never makes a paid call) also holds jobs until its reset.
+  - You can press Stop (after a confirmation window; a manual Stop that only you can clear) or Go (which also releases the held jobs at once via `ScheduledTasks::release_held`) on the Accounts page, or run `noai limits [go|stop AGENT]`. Control commands: `get_rate_gates`, `set_rate_gate`.
+  - Chats are never held. They get a `notice` warning instead. Timed resumes keep their own retry time.
 - **Notifications and usage budget:** `AutomationSettings` in the scheduled-tasks journal (`get_automation`/`set_automation`). The daemon sends OS notifications through `platform::notify` (osascript, notify-send, a PowerShell toast) when a job finishes, needs attention, waits for a reset, or is held by the budget. The budget (`reserve_percent`) is checked in `run_scheduled_due` before a claimed run starts: if any usage window of the job's agent is at or above 100 − reserve, the claim is undone (`ScheduledTasks::defer`) and the job is rescheduled for that window's reset. Running jobs are never stopped.
 - **CLI warnings:** `Harness::stderr_notice` turns a stderr line into a `notice` run event, shown even when the run succeeds (e.g. Claude Code ignoring an untrusted project's `.claude/settings.json` permissions).
 - **Pausing:** `paused` means the user paused it; it is not an error and does not show under Needs you. A paused job keeps its settings and history.

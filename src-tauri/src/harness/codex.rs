@@ -679,6 +679,7 @@ fn codex_snapshot(account: &Value, limits: &Value) -> ProviderUsageSnapshot {
         } else {
             None
         },
+        setup: None,
     }
 }
 

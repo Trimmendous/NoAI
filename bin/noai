@@ -23,6 +23,8 @@ Usage:
   noai jobs runs ID
   noai jobs retry ID [--at ISO-8601]
   noai jobs update-auto-resume ID true|false
+  noai limits [--socket PATH]            Go / Wait / Stop light of each agent
+  noai limits go|stop AGENT              Release or hold an agent's jobs
   noai service install [--binary /absolute/path/to/noai]
   noai service start|stop|status|uninstall
 
@@ -93,7 +95,13 @@ export function parse(argv) {
     if (args.length) fail(`service ${command} takes no arguments`);
     return { service: command };
   }
-  if (group !== 'jobs') fail('Expected "jobs" or "service"; run noai help');
+  if (group === 'limits') {
+    if (args.length === 0) return { socketPath, request: { command: 'get_rate_gates' } };
+    const [light, harness] = args;
+    if (args.length !== 2 || !['go', 'stop'].includes(light) || !harness || harness.startsWith('--')) fail('Use noai limits, or noai limits go|stop AGENT');
+    return { socketPath, request: { command: 'set_rate_gate', harness, light } };
+  }
+  if (group !== 'jobs') fail('Expected "jobs", "limits" or "service"; run noai help');
   const command = args.shift();
   if (command === 'list') {
     if (args.length) fail('jobs list takes no arguments');

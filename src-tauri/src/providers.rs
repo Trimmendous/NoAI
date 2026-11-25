@@ -77,6 +77,42 @@ pub struct ProviderUsageSnapshot {
     pub windows: Vec<ProviderUsageWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// What you need to do before this account's usage can be read, shown as
+    /// a step-by-step window behind a "Needs attention" button.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup: Option<SetupGuide>,
+}
+
+/// A short, ordered checklist with copyable commands.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupGuide {
+    pub title: String,
+    pub summary: String,
+    pub steps: Vec<SetupStep>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupStep {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+impl SetupStep {
+    pub fn say(text: &str) -> Self {
+        Self {
+            text: text.into(),
+            command: None,
+        }
+    }
+    pub fn run(text: &str, command: &str) -> Self {
+        Self {
+            text: text.into(),
+            command: Some(command.into()),
+        }
+    }
 }
 
 pub(crate) fn now() -> u64 {
@@ -130,6 +166,7 @@ pub(crate) fn unavailable(
         fetched_at: None,
         windows: vec![],
         detail: Some(detail.into()),
+        setup: None,
     }
 }
 
@@ -315,6 +352,7 @@ fn openrouter_snapshot(payload: &Value) -> ProviderUsageSnapshot {
         detail: Some(
             "Usage and limit are for this API key in USD; no reset timestamp is supplied.".into(),
         ),
+        setup: None,
     }
 }
 
@@ -377,6 +415,7 @@ mod expire_tests {
             fetched_at: Some(0),
             windows: vec![window(100.0, 900), window(40.0, 2_000)],
             detail: None,
+            setup: None,
         }];
         expire_windows(&mut snapshots, 1_000);
         let [past, current] = &snapshots[0].windows[..] else {

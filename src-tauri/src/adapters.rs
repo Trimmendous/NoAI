@@ -277,9 +277,72 @@ pub fn parse_line(request: &RunRequest, line: &str) -> Vec<RunEvent> {
     harness.parse(request, &value)
 }
 
+/// Words that mark a usage or rate limit.
+const LIMIT_WORDS: &[&str] = &[
+    "rate limit",
+    "rate_limit",
+    "usage limit",
+    "usage_limit",
+    "too many requests",
+    "quota",
+    "resource_exhausted",
+];
+
+/// What a failed run's message says about its agent's limits, for the
+/// Go / Wait / Stop light. `None` when it isn't about a limit at all.
+pub fn limit_signal(
+    harness: &str,
+    message: &str,
+    now_epoch: u64,
+) -> Option<crate::rate_gate::Signal> {
+    use crate::rate_gate::Signal;
+    if let Some((reset, _)) = classify_timed_quota(harness, message, now_epoch) {
+        return Some(Signal::Timed {
+            reset,
+            reason: short_reason(message),
+        });
+    }
+    let lower = message.to_ascii_lowercase();
+    let credits = [
+        "insufficient credits",
+        "out of credits",
+        "credits depleted",
+        "spend limit",
+        "payment required",
+    ];
+    let auth = ["unauthorized", "authentication", "invalid api key"];
+    let limited = LIMIT_WORDS.iter().any(|word| lower.contains(word))
+        || credits.iter().any(|word| lower.contains(word));
+    (limited && !auth.iter().any(|word| lower.contains(word))).then(|| Signal::Untimed {
+        reason: short_reason(message),
+    })
+}
+
+/// The first line of an error, at most 200 characters, for a light's reason.
+fn short_reason(message: &str) -> String {
+    let line = message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("Usage limit reached");
+    let mut text: String = line.chars().take(200).collect();
+    if line.chars().count() > 200 {
+        text.push('…');
+    }
+    text
+}
+
 /// Only schedules retries for explicit temporary provider limits with a stated delay.
 pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Option<(u64, String)> {
     let agent = crate::harness::get(harness)?;
+    // The agent may know its own limit messages better (Gemini's 429s mention billing
+    // as boilerplate, and its daily quota resets at a known time).
+    if let Some(reset) = agent
+        .limit_reset(message, now_epoch)
+        .filter(|reset| *reset > now_epoch && *reset - now_epoch <= 8 * 24 * 3600)
+    {
+        return Some((reset, format!("{harness} timed usage limit")));
+    }
     let lower = message.to_ascii_lowercase();
     if [
         "billing",
@@ -298,17 +361,7 @@ pub fn classify_timed_quota(harness: &str, message: &str, now_epoch: u64) -> Opt
     {
         return None;
     }
-    if ![
-        "rate limit",
-        "rate_limit",
-        "usage limit",
-        "usage_limit",
-        "too many requests",
-        "quota",
-    ]
-    .iter()
-    .any(|word| lower.contains(word))
-    {
+    if !LIMIT_WORDS.iter().any(|word| lower.contains(word)) {
         return None;
     }
     let relative = [
@@ -394,7 +447,7 @@ pub fn classify_structured_quota(
 }
 
 /// "2h 30m", "45 seconds", "41.2s" or "800ms", rounded up to whole seconds.
-fn parse_duration_seconds(input: &str) -> Option<u64> {
+pub(crate) fn parse_duration_seconds(input: &str) -> Option<u64> {
     let mut rest = input.trim_start();
     let mut total_ms = 0u64;
     let mut found = false;
@@ -746,9 +799,15 @@ mod tests {
                 "[API Error: You exceeded your current quota, please check your plan and billing details. Please retry in 41.2s.]",
                 100
             ),
-            None,
-            "billing wording means the user must look"
+            Some((142, "gemini timed usage limit".into())),
+            "Gemini's 429s mention billing as boilerplate"
         );
+        assert!(classify_timed_quota(
+            "codex",
+            "Quota exceeded, check your billing details. Please retry in 41.2s.",
+            100
+        )
+        .is_none());
         assert_eq!(
             classify_timed_quota(
                 "gemini",

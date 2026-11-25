@@ -76,6 +76,11 @@ mod unix {
         SetAutomation {
             input: crate::scheduled_tasks::AutomationSettings,
         },
+        GetRateGates,
+        SetRateGate {
+            harness: String,
+            light: String,
+        },
         ListChanges,
         ChangeDiff {
             run_id: String,
@@ -457,6 +462,10 @@ mod unix {
             Request::GetDigest => json!({"ok": true, "data": engine::get_digest(engine)}),
             Request::GetAutomation => json!({"ok": true, "data": engine::get_automation(engine)}),
             Request::SetAutomation { input } => result(engine::set_automation(engine, input)),
+            Request::GetRateGates => json!({"ok": true, "data": engine::rate_gates(engine)}),
+            Request::SetRateGate { harness, light } => {
+                result(engine::set_rate_gate(engine, &harness, &light))
+            }
             Request::ListChanges => json!({"ok": true, "data": engine::list_changes(engine)}),
             Request::ChangeDiff { run_id } => result(engine::change_diff(engine, run_id)),
             Request::ReviewChange { run_id, action } => {

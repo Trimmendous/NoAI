@@ -7,6 +7,7 @@
 mod claude;
 mod codex;
 mod gemini;
+mod gemini_usage;
 mod plugin_agent;
 
 use crate::adapters::{JobPermissions, RunEvent, RunRequest};
@@ -124,6 +125,12 @@ pub trait Harness: Send + Sync {
     /// For CLIs that print plain text: handles a raw output line instead of
     /// JSON parsing. `None` (the default) means "parse it as JSON".
     fn parse_text(&self, _request: &RunRequest, _line: &str) -> Option<Vec<RunEvent>> {
+        None
+    }
+    /// When the limit named in this agent's own error message resets, for
+    /// messages the shared parser can't read (wording or fixed reset times
+    /// only this provider uses). `None` falls back to the shared parser.
+    fn limit_reset(&self, _message: &str, _now: u64) -> Option<u64> {
         None
     }
     /// Whether "try again at 3:23 PM" (host local time) reset messages are trusted.

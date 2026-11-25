@@ -90,6 +90,13 @@
 .account-panel .source-label { overflow: hidden; padding: 0; color: var(--ink-muted); background: none; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .plan-button.text-button { padding: 4px 8px; border: 0; border-radius: var(--radius-pill); color: var(--accent); background: transparent; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 .plan-button.text-button:hover { background: var(--fill); }
+/* Go / Wait / Stop light of an agent's jobs. */
+.gate-controls { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.gate-button.text-button { padding: 4px 8px; border: 0; border-radius: var(--radius-pill); color: var(--accent); background: transparent; font-size: 12px; font-weight: 500; cursor: pointer; }
+.gate-button.text-button:hover { background: var(--fill); }
+.ui-pill.is-button { border: 0; font: inherit; font-size: 12px; cursor: pointer; }
+.ui-pill.is-button:hover { filter: brightness(.95); }
+.gate-note { margin: 0; color: var(--ink-muted); font-size: 12px; overflow-wrap: anywhere; }
 .ui-row.account-card { border-radius: 0; background: transparent; box-shadow: none; }
 .ui-row.account-card.is-link:hover { background: var(--fill); }
 .ui-ring-note { fill: var(--ink-muted); stroke: none; font-size: 8.5px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }

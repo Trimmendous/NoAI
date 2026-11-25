@@ -674,7 +674,7 @@ async fn claude_usage() -> ProviderUsageSnapshot {
                     "Reported by Claude Code with each run. When it is older than 10 minutes, Noai sends one tiny Haiku request to refresh it."
                 } else {
                     "Claude Code did not report its limits. This account may not have usage windows, or the CLI could not be reached."
-                }.into()) }
+                }.into()), setup: None }
         }
         Err(_) => {
             cache_identity("claude", None);
