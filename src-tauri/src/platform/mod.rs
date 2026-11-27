@@ -107,10 +107,6 @@ use std::{
     sync::Mutex,
 };
 
-/// launchd label for the macOS LaunchAgent written by `noai service install`.
-/// Keep in sync with `scripts/service/launchd.mjs`.
-pub const LAUNCHD_LABEL: &str = "dev.noai.daemon";
-
 fn home() -> Option<PathBuf> {
     env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))

@@ -87,6 +87,17 @@ pub struct Task {
     pub worktree: bool,
 }
 
+impl Task {
+    fn schedule_next_occurrence(&mut self, scheduled_at: u64, at: u64, interval: u64) {
+        // Skip missed occurrences while keeping the original cadence.
+        let missed = at.saturating_sub(scheduled_at) / interval;
+        self.next_run_at = Some(
+            scheduled_at.saturating_add(missed.saturating_add(1).saturating_mul(interval)),
+        );
+        self.status = "scheduled".into();
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DigestInput {
@@ -321,6 +332,33 @@ impl ScheduledTasks {
                         Some("Noai closed during this run. Review before scheduling again.".into());
                     changed = true;
                 }
+            }
+            let Some(interval) = task.interval_seconds.filter(|interval| *interval > 0) else {
+                continue;
+            };
+            if is_digest(task)
+                || !matches!(task.status.as_str(), "failed" | "needs_attention")
+                || task.next_run_at.is_some()
+                || task.pending_resume_id.is_some()
+            {
+                continue;
+            }
+            // Older versions stopped recurring jobs on a terminal failure.
+            // Interrupted runs have a separate review message on the job.
+            if let Some(run) = journal.runs.iter().find(|run| {
+                task.last_run_id.as_ref() == Some(&run.run_id)
+                    && run.status == task.status
+                    && run.finished_at.is_some()
+                    && run.result.is_some()
+                    && run.result == task.last_result
+            }) {
+                let scheduled_at = if run.scheduled_at == 0 {
+                    run.started_at
+                } else {
+                    run.scheduled_at
+                };
+                task.schedule_next_occurrence(scheduled_at, now(), interval);
+                changed = true;
             }
         }
         if changed {
@@ -1037,7 +1075,7 @@ impl ScheduledTasks {
                 .iter_mut()
                 .find(|run| run.run_id == run_id)
                 .ok_or_else(|| "Scheduled run not found".to_string())?;
-            if run.status == "cancelled" || run.status == "completed" {
+            if !matches!(run.status.as_str(), "running" | "waiting") {
                 return Ok(None);
             }
             run.status = status.into();
@@ -1049,7 +1087,7 @@ impl ScheduledTasks {
                 .iter_mut()
                 .find(|task| task.id == run.task_id)
                 .ok_or_else(|| "Scheduled task not found".to_string())?;
-            if task.status == "cancelled" {
+            if task.status == "cancelled" || task.last_run_id.as_deref() != Some(run_id) {
                 return Ok(None);
             }
             task.last_result = Some(result);
@@ -1062,14 +1100,10 @@ impl ScheduledTasks {
                 }
                 return Ok(Some(task.clone()));
             }
-            if let Some(interval) = task.interval_seconds.filter(|_| status == "completed") {
-                // Skip missed occurrences; never launch a catch-up burst.
-                let elapsed = at.saturating_sub(scheduled_at);
-                let missed = elapsed / interval;
-                task.next_run_at = Some(
-                    scheduled_at.saturating_add(missed.saturating_add(1).saturating_mul(interval)),
-                );
-                task.status = "scheduled".into();
+            if let Some(interval) = task.interval_seconds.filter(|interval| {
+                *interval > 0 && matches!(status, "completed" | "failed" | "needs_attention")
+            }) {
+                task.schedule_next_occurrence(scheduled_at, at, interval);
             } else {
                 task.next_run_at = None;
                 task.status = status.into();
@@ -1652,6 +1686,80 @@ mod tests {
         assert!(reopened.list()[0].dangerously_bypass_permissions);
         assert_eq!(reopened.runs(&task.id).unwrap().len(), 1);
         drop(reopened);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recurring_failure_keeps_the_next_occurrence_and_recovers_legacy_schedule() {
+        let dir = std::env::temp_dir().join(unique_id("noai-scheduled-test"));
+        let store = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let input: CreateTaskInput = serde_json::from_value(serde_json::json!({
+            "title": "Recurring job", "prompt": "Check", "harness": "codex",
+            "projectPath": "/tmp", "startAt": now() + 600, "intervalSeconds": 60
+        }))
+        .unwrap();
+        let task = store.create(input.clone()).unwrap();
+        let due = task.next_run_at.unwrap();
+        let request = store.claim_due(due).unwrap().remove(0).1;
+        let mut session = RunEvent::new(&request, "session", None);
+        session.resume_id = Some("old-provider-session".into());
+        store.append_event(&request.run_id, &session).unwrap();
+        let failed = store
+            .finish(
+                &request.run_id,
+                "needs_attention",
+                "Connection failed".into(),
+                due + 121,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(failed.status, "scheduled");
+        assert_eq!(failed.next_run_at, Some(due + 180));
+        assert!(store.claim_due(due + 179).unwrap().is_empty());
+        let next = store.claim_due(due + 180).unwrap().remove(0).1;
+        assert!(next.resume_id.is_none());
+        assert_ne!(next.run_id, request.run_id);
+        assert!(store
+            .finish(&request.run_id, "completed", "Late result".into(), due + 181)
+            .unwrap()
+            .is_none());
+        let runs = store.runs(&task.id).unwrap();
+        assert_eq!(runs[0].result.as_deref(), Some("Connection failed"));
+        assert_eq!(runs[1].status, "running");
+        store.cancel(&task.id).unwrap();
+
+        let legacy = store.create(input.clone()).unwrap();
+        let interrupted = store.create(input).unwrap();
+        let request = store.claim_due(due).unwrap().remove(0).1;
+        store
+            .finish(&request.run_id, "failed", "Connection failed".into(), due + 1)
+            .unwrap();
+        store
+            .update(|journal| {
+                let task = journal
+                    .tasks
+                    .iter_mut()
+                    .find(|task| task.id == legacy.id)
+                    .unwrap();
+                task.status = "failed".into();
+                task.next_run_at = None;
+                Ok(())
+            })
+            .unwrap();
+        drop(store);
+
+        let reopened = ScheduledTasks::open_in_dir(&dir).unwrap();
+        let tasks = reopened.list();
+        assert_eq!(tasks[0].status, "cancelled");
+        assert_eq!(tasks[1].status, "scheduled");
+        assert_eq!(tasks[1].next_run_at, Some(due + 60));
+        assert_eq!(reopened.runs(&legacy.id).unwrap()[0].status, "failed");
+        assert_eq!(tasks[2].id, interrupted.id);
+        assert_eq!(tasks[2].status, "needs_attention");
+        assert_eq!(tasks[2].next_run_at, None);
+        drop(reopened);
+        let reopened = ScheduledTasks::open_in_dir(&dir).unwrap();
+        assert_eq!(reopened.list()[2].status, "needs_attention");
         fs::remove_dir_all(dir).unwrap();
     }
 

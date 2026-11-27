@@ -743,7 +743,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     const stats = jobStats(task);
     const latest = completedRun || stats.runs.find(run => run.runId === task.lastRunId) || stats.runs.at(-1);
     const status = completedRun || task.status === 'running' && latest ? runStatus(latest) : task.status;
-    const finished = !!completedRun || !task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status);
+    const finished = !!completedRun || task.status === 'cancelled' || !task.intervalSeconds && ['completed', 'failed'].includes(task.status);
     const row = element('tr', `job-table-row is-${status}`);
     row.addEventListener('click', event => { if (!event.target.closest('.job-table-actions button, .job-row-open')) openJob(task, completedRun); });
     const open = element('button', 'job-row-open');
@@ -760,7 +760,10 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
     const state = element('span', 'job-row-state');
     if (completedRun) state.append(badge(status));
     else if (['running', 'waiting', 'failed', 'needs_attention', 'paused', 'cancelled'].includes(status) || finished) state.append(badge(status));
-    else if (task.nextRunAt && task.status === 'scheduled') state.append(element('span', 'job-row-when', formatShortTime(task.nextRunAt)));
+    else if (task.nextRunAt && task.status === 'scheduled') {
+      state.append(element('span', 'job-row-when', formatShortTime(task.nextRunAt)));
+      if (latest && NEEDS_YOU.has(runStatus(latest))) state.append(badge(runStatus(latest)));
+    }
     const rate = element('span', stats.rate == null ? '' : stats.rate >= .95 ? 'is-good' : stats.rate >= .8 ? 'is-warn' : 'is-bad', stats.rate == null ? '—' : `${Math.round(stats.rate * 100)}%`);
     const cells = completedRun
       ? [name, cell(historyBars(stats, task)), cell(state), cell(duration(completedRun) || '—', 'is-number'), cell(runTokens(completedRun) ? compactNumber(runTokens(completedRun)) : '—', 'is-number'), cell(formatShortTime(completedRun.finishedAt || completedRun.startedAt))]
@@ -793,17 +796,22 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
   }
 
   function filtered() {
-    const active = tasks.filter(task => !(!task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status)));
-    const completed = tasks.filter(task => !task.intervalSeconds && ['completed', 'cancelled', 'failed'].includes(task.status)).map(task => ({ task, run: null }));
+    const ended = task => task.status === 'cancelled' || !task.intervalSeconds && ['completed', 'failed'].includes(task.status);
+    const active = tasks.filter(task => !ended(task));
+    const completed = tasks.filter(ended).map(task => ({ task, run: null }));
     for (const task of tasks.filter(task => task.intervalSeconds)) {
       for (const run of runCache.get(task.id) || []) {
-        if (['completed', 'failed', 'cancelled'].includes(runStatus(run))) completed.push({ task, run });
+        if (['completed', 'failed'].includes(runStatus(run))) completed.push({ task, run });
       }
     }
     completed.sort((a, b) => (b.run?.finishedAt || b.task.createdAt || 0) - (a.run?.finishedAt || a.task.createdAt || 0));
     return {
       scheduled: active.map(task => ({ task })),
-      attention: tasks.filter(task => NEEDS_YOU.has(task.status)).map(task => ({ task })),
+      attention: tasks.filter(task => {
+        if (NEEDS_YOU.has(task.status)) return true;
+        const latest = runCache.get(task.id)?.find(run => run.runId === task.lastRunId);
+        return task.status === 'scheduled' && latest && NEEDS_YOU.has(runStatus(latest));
+      }).map(task => ({ task })),
       running: active.filter(task => ['running', 'waiting'].includes(task.status)).map(task => ({ task })),
       completed,
     };
@@ -910,7 +918,7 @@ export function initScheduledTasks({ list, create, edit, retry, cancel, pause, r
           }
           catch { runErrors.set(task.id, 'Could not load runs. Refresh to retry.'); }
         }));
-        // A failed occurrence is terminal; interrupted work remains visible as paused.
+        // Keep the schedule status for jobs with another occurrence queued.
         tasks = tasks.map(task => {
           const latest = runCache.get(task.id)?.find(run => run.runId === task.lastRunId);
           if (task.status === 'running' && latest) return { ...task, status: runStatus(latest) };

@@ -311,6 +311,12 @@ try {
   await chat.waitForFunction(() => window.testTasks.find(task => task.title === 'Recurring review edited').status === 'cancelled');
   await chat.locator('#job-back').click();
   assert.equal(await chat.evaluate(() => window.testTasks.find(task => task.title === 'Recurring review edited').status), 'cancelled');
+  await chat.locator('.job-filter.is-scheduled').click();
+  assert.equal(await jobRow('Recurring review edited').count(), 0);
+  await chat.locator('.job-filter.is-completed').click();
+  const cancelledJob = chat.locator('.job-table-row').filter({ hasText: 'Recurring review edited' }).filter({ hasText: 'Cancelled' });
+  await cancelledJob.waitFor();
+  assert.doesNotMatch(await cancelledJob.innerText(), /Run #/);
   await chat.evaluate(() => {
     const make = (id, status, intervalSeconds = null) => ({id, title:id, status, intervalSeconds, harness:'claude', model:'claude-fixture', prompt:'Check work', createdAt:2000000000, lastRunId:`${id}-run`});
     window.testTasks = [make('Recurring waiting', 'running', 3600), make('Paused check', 'needs_attention'), make('Failed check', 'needs_attention'), ...Array.from({length:30}, (_, i) => make(`Finished ${i}`, 'completed'))];

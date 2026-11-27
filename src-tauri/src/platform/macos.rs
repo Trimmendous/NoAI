@@ -4,6 +4,9 @@ use std::{
     process::{Command, Stdio},
 };
 
+// Keep in sync with `scripts/service/launchd.mjs`.
+const LAUNCHD_LABEL: &str = "dev.noai.daemon";
+
 pub fn data_dir(home: &Path) -> PathBuf {
     home.join("Library/Application Support/dev.noai.desktop")
 }
@@ -28,7 +31,7 @@ pub fn start_user_service() {
     // SAFETY: getuid has no preconditions and cannot fail.
     let uid = unsafe { libc::getuid() };
     let _ = Command::new("launchctl")
-        .args(["kickstart", &format!("gui/{uid}/{}", super::LAUNCHD_LABEL)])
+        .args(["kickstart", &format!("gui/{uid}/{LAUNCHD_LABEL}")])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -37,7 +40,7 @@ pub fn start_user_service() {
 
 /// launchd exports the job label to processes it starts.
 pub fn managed_by_service() -> bool {
-    std::env::var("XPC_SERVICE_NAME").is_ok_and(|name| name == super::LAUNCHD_LABEL)
+    std::env::var("XPC_SERVICE_NAME").is_ok_and(|name| name == LAUNCHD_LABEL)
 }
 
 /// Opens a web link in the user's default browser.

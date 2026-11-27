@@ -168,7 +168,7 @@ Use `./bin/noai` (run `./bin/noai help` for syntax). It prints JSON, so confirm 
 - **How runs behave:**
   - Runs never overlap within one job.
   - Missed occurrences collapse into one run.
-  - Failed or interrupted runs stop for review and do not repeat automatically.
+  - A failed recurring occurrence stays in history and the job continues at its next interval. An uncertain run interrupted by a daemon restart stops for review unless it was already waiting for a timed resume.
   - Any job that hasn't ended (not Cancelled or Completed) can be edited: prompt, model, agent, folder, frequency, permissions. Status, history and the pending resume ID are kept. Only Scheduled and Paused jobs take a new start time; a running run finishes with its old settings and the edit applies from the next run. Ended jobs use Run again instead.
 - **Standing job instructions:** Settings › Job instructions holds one text for recurring jobs and one for one-time jobs (`JobInstructions` in the scheduled-tasks journal, owned by the daemon). `claim_due` puts it before the job's prompt; the digest is skipped. Each run's saved `prompt` is the full text sent.
 - **Themes:** System, Light, Dark and Matrix. Matrix sets `data-theme='dark'` plus `data-skin='matrix'` (styles/matrix.css), so every dark rule still applies; `components/matrix-rain.js` draws the rain on `#matrix-rain` only while that skin is on, and draws one still frame under reduced motion.

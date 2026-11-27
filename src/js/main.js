@@ -1157,16 +1157,18 @@ void changesPanel.refresh();
 
 // Plugins hear when a job's run finishes ("job.finished").
 const jobRunsSeen = new Map();
-function noteJobForPlugins(task) {
-  if (!task?.id || !task.lastRunId || !task.lastResult) return;
-  const seen = jobRunsSeen.get(task.id);
-  jobRunsSeen.set(task.id, task.lastRunId);
-  if (seen === undefined || seen === task.lastRunId) return;
-  pluginHost?.emit('job.finished', { jobId: task.id, title: task.title, status: task.status === 'scheduled' ? 'completed' : task.status, result: task.lastResult }, 'jobs:read');
+async function noteJobForPlugins(task) {
+  if (!pluginHost || !task?.id || !task.lastRunId || !task.lastResult || jobRunsSeen.get(task.id) === task.lastRunId) return;
+  try {
+    const run = (await getScheduledTaskRuns(task.id)).find(run => run.runId === task.lastRunId);
+    if (!run?.finishedAt || run.result !== task.lastResult || jobRunsSeen.get(task.id) === run.runId) return;
+    jobRunsSeen.set(task.id, run.runId);
+    pluginHost.emit('job.finished', { jobId: task.id, title: task.title, status: run.status, result: run.result }, 'jobs:read');
+  } catch { /* job history unavailable */ }
 }
 try { (await listScheduledTasks()).forEach(task => { if (task.lastRunId) jobRunsSeen.set(task.id, task.lastRunId); }); } catch { /* jobs unavailable */ }
 try { await listenScheduledTasks(task => {
-  noteJobForPlugins(task);
+  void noteJobForPlugins(task);
   void changesPanel?.refresh(); if (['jobs', 'job', 'job-conversation'].includes(view)) void scheduledTasks.refresh(); if (view === 'digest') void digestPanel.refresh(); }); }
 catch (error) { toast(`Job updates are unavailable: ${String(error)}`, 'error'); }
 try {
